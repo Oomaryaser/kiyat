@@ -1,0 +1,14 @@
+{
+  "name": "kiyat",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/backend",
+    "packages/shared-types"
+  ],
+  "scripts": {
+    "backend:dev": "npm --workspace @kiyat/backend run start:dev",
+    "backend:build": "npm --workspace @kiyat/backend run build",
+    "backend:seed": "npm --workspace @kiyat/backend run seed"
+  }
+}
