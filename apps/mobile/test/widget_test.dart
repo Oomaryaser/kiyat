@@ -6,10 +6,11 @@ import 'package:kiyat_mobile/main.dart';
 void main() {
   testWidgets('Kiyat passenger home smoke test', (tester) async {
     await tester.pumpWidget(const ProviderScope(child: KiyatApp()));
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 7));
+    await tester.pump();
 
     expect(find.text('كيات'), findsOneWidget);
     expect(find.text('الخطوط القريبة'), findsOneWidget);
-    expect(find.text('من وين؟'), findsOneWidget);
+    expect(find.text('المحفوظة'), findsOneWidget);
   });
 }

@@ -4,8 +4,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
+import 'shared/notifications/passenger_notifications.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await passengerNotifications.initialize();
   runApp(const ProviderScope(child: KiyatApp()));
 }
 
@@ -28,7 +31,9 @@ class KiyatApp extends ConsumerWidget {
         GlobalCupertinoLocalizations.delegate,
       ],
       builder: (context, child) {
-        return Directionality(textDirection: TextDirection.rtl, child: child ?? const SizedBox.shrink());
+        return Directionality(
+            textDirection: TextDirection.rtl,
+            child: child ?? const SizedBox.shrink());
       },
     );
   }

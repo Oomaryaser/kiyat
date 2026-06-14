@@ -5,6 +5,7 @@ import '../../features/auth/auth_screen.dart';
 import '../../features/home/home_screen.dart';
 import '../../features/map/map_screen.dart';
 import '../../features/route_detail/route_detail_screen.dart';
+import '../../features/settings/settings_screen.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
   return GoRouter(
@@ -14,8 +15,12 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/auth', builder: (context, state) => const AuthScreen()),
       GoRoute(path: '/map', builder: (context, state) => const MapScreen()),
       GoRoute(
+          path: '/settings',
+          builder: (context, state) => const SettingsScreen()),
+      GoRoute(
         path: '/routes/:id',
-        builder: (context, state) => RouteDetailScreen(routeId: state.pathParameters['id'] ?? 'sample'),
+        builder: (context, state) =>
+            RouteDetailScreen(routeId: state.pathParameters['id'] ?? 'sample'),
       ),
     ],
   );

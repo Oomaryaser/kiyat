@@ -3,7 +3,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 final apiClientProvider = Provider<Dio>((ref) {
-  final dio = Dio(BaseOptions(baseUrl: const String.fromEnvironment('API_URL', defaultValue: 'http://localhost:3000')));
+  final dio = Dio(
+    BaseOptions(
+      baseUrl: const String.fromEnvironment(
+        'API_URL',
+        defaultValue: 'http://localhost:3000',
+      ),
+      connectTimeout: const Duration(seconds: 2),
+      receiveTimeout: const Duration(seconds: 4),
+    ),
+  );
   dio.interceptors.add(
     InterceptorsWrapper(
       onRequest: (options, handler) async {
@@ -17,9 +26,12 @@ final apiClientProvider = Provider<Dio>((ref) {
           final prefs = await SharedPreferences.getInstance();
           final refresh = prefs.getString('refresh_token');
           if (refresh != null) {
-            final response = await dio.post<dynamic>('/auth/refresh', data: {'refreshToken': refresh});
-            await prefs.setString('access_token', response.data['accessToken'] as String);
-            await prefs.setString('refresh_token', response.data['refreshToken'] as String);
+            final response = await dio.post<dynamic>('/auth/refresh',
+                data: {'refreshToken': refresh});
+            await prefs.setString(
+                'access_token', response.data['accessToken'] as String);
+            await prefs.setString(
+                'refresh_token', response.data['refreshToken'] as String);
             final retry = await dio.fetch<dynamic>(error.requestOptions);
             return handler.resolve(retry);
           }

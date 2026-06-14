@@ -12,19 +12,20 @@ import { SavedRoutesModule } from './saved-routes/saved-routes.module';
 import { Stop } from './stops/stop.entity';
 import { StopsModule } from './stops/stops.module';
 import { TrackingModule } from './tracking/tracking.module';
+import { PassengerWait } from './tracking/passenger-wait.entity';
 import { Vehicle } from './tracking/vehicle.entity';
 import { User } from './users/user.entity';
 import { UsersModule } from './users/users.module';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
+    ConfigModule.forRoot({ envFilePath: ['.env', '../../.env'], isGlobal: true }),
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
         type: 'postgres',
         url: config.getOrThrow<string>('DATABASE_URL'),
-        entities: [TransitRoute, Stop, RouteStop, Vehicle, User, CommunityReport, SavedRoute],
+        entities: [TransitRoute, Stop, RouteStop, Vehicle, PassengerWait, User, CommunityReport, SavedRoute],
         synchronize: config.get<string>('TYPEORM_SYNC', 'true') === 'true',
         logging: config.get<string>('TYPEORM_LOGGING', 'false') === 'true',
       }),

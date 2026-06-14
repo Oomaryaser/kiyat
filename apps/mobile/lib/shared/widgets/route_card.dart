@@ -9,11 +9,13 @@ class RouteCard extends StatelessWidget {
     required this.route,
     this.isActiveWait = false,
     this.disabled = false,
+    this.distanceMeters,
   });
 
   final TransitRoute route;
   final bool isActiveWait;
   final bool disabled;
+  final double? distanceMeters;
 
   @override
   Widget build(BuildContext context) {
@@ -62,6 +64,8 @@ class RouteCard extends StatelessWidget {
                                 ?.copyWith(fontWeight: FontWeight.w700))),
                     if (disabled)
                       const Icon(Icons.lock_outline, size: 20)
+                    else if (distanceMeters != null)
+                      _DistanceBadge(distanceMeters: distanceMeters!)
                     else
                       _ConfidenceBadge(score: route.confidenceScore),
                   ],
@@ -99,6 +103,31 @@ class RouteCard extends StatelessWidget {
       RouteType.bus => 'باص',
       RouteType.minibus => 'ميني',
     };
+  }
+}
+
+class _DistanceBadge extends StatelessWidget {
+  const _DistanceBadge({required this.distanceMeters});
+
+  final double distanceMeters;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final text = distanceMeters >= 1000
+        ? '${(distanceMeters / 1000).toStringAsFixed(1)} كم'
+        : '${distanceMeters.round()} م';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: colors.primary.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(color: colors.primary, fontWeight: FontWeight.w800),
+      ),
+    );
   }
 }
 

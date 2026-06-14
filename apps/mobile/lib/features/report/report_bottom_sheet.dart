@@ -21,23 +21,36 @@ class _ReportBottomSheetState extends State<ReportBottomSheet> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('بلّغ عن تغيير', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
+          Text('بلّغ عن تغيير',
+              style: Theme.of(context)
+                  .textTheme
+                  .titleLarge
+                  ?.copyWith(fontWeight: FontWeight.w800)),
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
             initialValue: type,
             items: const [
-              DropdownMenuItem(value: 'route_change', child: Text('تغيير بالمسار')),
-              DropdownMenuItem(value: 'fare_change', child: Text('تغيير بالسعر')),
+              DropdownMenuItem(
+                  value: 'route_change', child: Text('تغيير بالمسار')),
+              DropdownMenuItem(
+                  value: 'fare_change', child: Text('تغيير بالسعر')),
               DropdownMenuItem(value: 'closed', child: Text('الخط متوقف')),
-              DropdownMenuItem(value: 'now_running', child: Text('الخط شغال الآن')),
+              DropdownMenuItem(
+                  value: 'now_running', child: Text('الخط شغال الآن')),
               DropdownMenuItem(value: 'other', child: Text('شيء آخر')),
             ],
             onChanged: (value) => setState(() => type = value ?? type),
           ),
           const SizedBox(height: 12),
-          const TextField(maxLines: 4, decoration: InputDecoration(hintText: 'اكتب التفاصيل')),
+          const TextField(
+              maxLines: 4,
+              decoration: InputDecoration(hintText: 'اكتب التفاصيل')),
           const SizedBox(height: 12),
-          SizedBox(width: double.infinity, child: FilledButton(onPressed: () => Navigator.pop(context), child: const Text('إرسال'))),
+          SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('إرسال'))),
         ],
       ),
     );

@@ -17,16 +17,21 @@ class AppTheme {
       fontFamily: 'Tajawal',
       colorScheme: colorScheme,
       scaffoldBackgroundColor: background,
-      appBarTheme: const AppBarTheme(centerTitle: false, backgroundColor: background, elevation: 0),
+      appBarTheme: const AppBarTheme(
+          centerTitle: false, backgroundColor: background, elevation: 0),
       cardTheme: CardThemeData(
         color: Colors.white,
         elevation: 0,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8), side: BorderSide(color: Colors.grey.shade200)),
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+            side: BorderSide(color: Colors.grey.shade200)),
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: Colors.white,
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+        border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide.none),
       ),
     );
   }

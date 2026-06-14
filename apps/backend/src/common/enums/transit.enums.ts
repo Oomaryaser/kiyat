@@ -36,3 +36,9 @@ export enum ReportStatus {
   Approved = 'approved',
   Rejected = 'rejected',
 }
+
+export enum PassengerWaitStatus {
+  Waiting = 'waiting',
+  Boarded = 'boarded',
+  Cancelled = 'cancelled',
+}
