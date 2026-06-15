@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { JwtModule } from '@nestjs/jwt';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { AuthModule } from '../auth/auth.module';
 import { RouteStop } from '../routes/route-stop.entity';
 import { TransitRoute } from '../routes/route.entity';
 import { PassengerWait } from './passenger-wait.entity';
@@ -10,7 +12,12 @@ import { TrackingGateway } from './tracking.gateway';
 import { TrackingService } from './tracking.service';
 
 @Module({
-  imports: [ConfigModule, TypeOrmModule.forFeature([Vehicle, TransitRoute, RouteStop, PassengerWait])],
+  imports: [
+    ConfigModule,
+    JwtModule.register({}),
+    AuthModule,
+    TypeOrmModule.forFeature([Vehicle, TransitRoute, RouteStop, PassengerWait]),
+  ],
   controllers: [TrackingController],
   providers: [TrackingGateway, TrackingService],
 })

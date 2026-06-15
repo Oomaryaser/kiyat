@@ -49,3 +49,24 @@ export class UpdatePassengerWaitDto {
   @IsNumber()
   speedMetersPerSecond?: number;
 }
+
+export class CreateDriverVehicleDto {
+  @IsOptional()
+  @IsString()
+  plateNumber?: string;
+}
+
+export class UpdateVehicleLocationDto {
+  @Type(() => Number)
+  @IsNumber()
+  lat!: number;
+
+  @Type(() => Number)
+  @IsNumber()
+  lng!: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  speedMetersPerSecond?: number;
+}

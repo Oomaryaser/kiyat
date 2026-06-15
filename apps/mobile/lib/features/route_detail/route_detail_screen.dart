@@ -29,6 +29,8 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
   _LocationIssue? locationIssue;
   String? waitSessionId;
   String? waitStatus;
+  DateTime? waitLastSyncedAt;
+  String? waitSyncError;
   double? pickupLat;
   double? pickupLng;
   bool autoLocateRequested = false;
@@ -38,6 +40,7 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
   bool arrivalNoticeShown = false;
   StreamSubscription<Position>? _positionSubscription;
   Timer? _arrivalRefreshTimer;
+  Timer? _waitHeartbeatTimer;
 
   @override
   void initState() {
@@ -48,6 +51,7 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
   void dispose() {
     _positionSubscription?.cancel();
     _arrivalRefreshTimer?.cancel();
+    _waitHeartbeatTimer?.cancel();
     super.dispose();
   }
 
@@ -142,7 +146,25 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
             locating: locating,
             hasLocationError: locationError != null,
             waitStatus: waitStatus,
+            waitIsVisible: _waitIsVisible,
             trackingIsStale: trackingIsStale,
+          ),
+          const SizedBox(height: 12),
+          _WaitVisibilityCard(
+            waitStatus: waitStatus,
+            waitLastSyncedAt: waitLastSyncedAt,
+            waitSyncError: waitSyncError,
+            pickupStop: pickupStop,
+            usingCurrentLocation: usingCurrentLocation,
+            locating: locating,
+            onRetry: effectivePickupLat == null || effectivePickupLng == null
+                ? null
+                : () => _startPassengerWait(
+                      route.id,
+                      effectivePickupLat,
+                      effectivePickupLng,
+                    ).then((_) => _startLocationStream()),
+            onStopWaiting: _stopWaiting,
           ),
           const SizedBox(height: 12),
           _ArrivalCard(
@@ -186,6 +208,12 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
     final lastSeenAt = arrival?.lastSeenAt;
     if (lastSeenAt == null) return false;
     return DateTime.now().difference(lastSeenAt.toLocal()).inMinutes >= 5;
+  }
+
+  bool get _waitIsVisible {
+    return waitSessionId != null &&
+        waitStatus == 'waiting' &&
+        waitSyncError == null;
   }
 
   Future<void> _toggleSaved(String routeId, bool saved) async {
@@ -397,20 +425,33 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
 
   Future<void> _startPassengerWait(
       String routeId, double lat, double lng) async {
+    setState(() {
+      waitSyncError = null;
+    });
     final session =
         await ref.read(transitRepositoryProvider).startPassengerWait(
               routeId: routeId,
               lat: lat,
               lng: lng,
             );
-    if (!mounted || session == null || session.id.isEmpty) return;
+    if (!mounted) return;
+    if (session == null || session.id.isEmpty) {
+      setState(() {
+        waitSyncError =
+            'ما قدرنا نظهر انتظارك للسائق. تأكد من الاتصال وجرب مرة ثانية.';
+      });
+      return;
+    }
     setState(() {
       waitSessionId = session.id;
       waitStatus = session.status;
+      waitLastSyncedAt = DateTime.now();
+      waitSyncError = null;
     });
     await ref
         .read(transitRepositoryProvider)
         .saveActiveWaitSessionId(session.id);
+    _startWaitHeartbeat(lat, lng);
   }
 
   Future<void> _stopWaiting() async {
@@ -421,6 +462,8 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
     }
     await _positionSubscription?.cancel();
     _positionSubscription = null;
+    _waitHeartbeatTimer?.cancel();
+    _waitHeartbeatTimer = null;
     _arrivalRefreshTimer?.cancel();
     _arrivalRefreshTimer = null;
     await repository.clearActiveWaitRouteId();
@@ -429,6 +472,8 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
     setState(() {
       waitSessionId = null;
       waitStatus = 'cancelled';
+      waitLastSyncedAt = null;
+      waitSyncError = null;
       pickupStopIndex = null;
       pickupLat = null;
       pickupLng = null;
@@ -460,11 +505,26 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
                         ? position.speed
                         : null,
               );
-      if (!mounted || session == null) return;
-      setState(() => waitStatus = session.status);
+      if (!mounted) return;
+      if (session == null) {
+        setState(() {
+          waitSyncError =
+              'تحديث موقعك ما وصل للسائق. راح نعيد المحاولة تلقائياً.';
+        });
+        return;
+      }
+      setState(() {
+        waitStatus = session.status;
+        waitLastSyncedAt = DateTime.now();
+        waitSyncError = null;
+        pickupLat = position.latitude;
+        pickupLng = position.longitude;
+      });
       if (session.isBoarded) {
         await _positionSubscription?.cancel();
         _positionSubscription = null;
+        _waitHeartbeatTimer?.cancel();
+        _waitHeartbeatTimer = null;
         await ref.read(transitRepositoryProvider).clearActiveWaitRouteId();
         ref.invalidate(activeWaitRouteIdProvider);
         if (!mounted) return;
@@ -474,6 +534,46 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
           ),
         );
       }
+    });
+  }
+
+  void _startWaitHeartbeat(double lat, double lng) {
+    _waitHeartbeatTimer?.cancel();
+    pickupLat = lat;
+    pickupLng = lng;
+    _waitHeartbeatTimer = Timer.periodic(const Duration(seconds: 45), (_) {
+      final waitId = waitSessionId;
+      final nextLat = pickupLat;
+      final nextLng = pickupLng;
+      if (waitId == null ||
+          waitId.isEmpty ||
+          waitStatus != 'waiting' ||
+          nextLat == null ||
+          nextLng == null) {
+        return;
+      }
+      ref
+          .read(transitRepositoryProvider)
+          .updatePassengerWait(
+            waitId: waitId,
+            lat: nextLat,
+            lng: nextLng,
+          )
+          .then((session) {
+        if (!mounted) return;
+        if (session == null) {
+          setState(() {
+            waitSyncError =
+                'تحديث ظهورك للسائق تأخر. راح نعيد المحاولة تلقائياً.';
+          });
+          return;
+        }
+        setState(() {
+          waitStatus = session.status;
+          waitLastSyncedAt = DateTime.now();
+          waitSyncError = null;
+        });
+      });
     });
   }
 
@@ -786,6 +886,127 @@ enum _LocationIssue {
   unknown,
 }
 
+class _WaitVisibilityCard extends StatelessWidget {
+  const _WaitVisibilityCard({
+    required this.waitStatus,
+    required this.waitLastSyncedAt,
+    required this.waitSyncError,
+    required this.pickupStop,
+    required this.usingCurrentLocation,
+    required this.locating,
+    required this.onRetry,
+    required this.onStopWaiting,
+  });
+
+  final String? waitStatus;
+  final DateTime? waitLastSyncedAt;
+  final String? waitSyncError;
+  final TransitStop? pickupStop;
+  final bool usingCurrentLocation;
+  final bool locating;
+  final VoidCallback? onRetry;
+  final VoidCallback onStopWaiting;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final isVisible = waitStatus == 'waiting' && waitSyncError == null;
+    final isBoarded = waitStatus == 'boarded';
+    final icon = isBoarded
+        ? Icons.check_circle_outline
+        : isVisible
+            ? Icons.visibility_outlined
+            : waitSyncError != null
+                ? Icons.visibility_off_outlined
+                : Icons.sync_outlined;
+    final color = isBoarded
+        ? Colors.blue.shade700
+        : isVisible
+            ? colors.primary
+            : waitSyncError != null
+                ? colors.error
+                : Colors.orange.shade800;
+    final title = isBoarded
+        ? 'تم إخفاء انتظارك'
+        : isVisible
+            ? 'أنت ظاهر للسائقين'
+            : waitSyncError != null
+                ? 'انتظارك غير ظاهر حالياً'
+                : 'دا نثبت انتظارك';
+    final subtitle = isBoarded
+        ? 'اعتبرناك صعدت الكية، وما راح تظهر كنقطة انتظار للسائق.'
+        : waitSyncError ??
+            (isVisible
+                ? _visibleMessage
+                : 'نرسل موقع صعودك للسائقين على هذا الخط.');
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: color.withValues(alpha: 0.28)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          CircleAvatar(
+            backgroundColor: color.withValues(alpha: 0.12),
+            foregroundColor: color,
+            child: Icon(icon),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title,
+                    style: const TextStyle(fontWeight: FontWeight.w900)),
+                const SizedBox(height: 4),
+                Text(subtitle, style: TextStyle(color: Colors.grey.shade700)),
+                if (waitLastSyncedAt != null && isVisible) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    'آخر تحديث وصل قبل ${_relativeArabic(waitLastSyncedAt!)}',
+                    style: TextStyle(
+                      color: colors.primary,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+                if (waitSyncError != null) ...[
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      FilledButton.tonalIcon(
+                        onPressed: locating ? null : onRetry,
+                        icon: const Icon(Icons.refresh),
+                        label: const Text('إعادة الإظهار'),
+                      ),
+                      const SizedBox(width: 8),
+                      TextButton(
+                        onPressed: onStopWaiting,
+                        child: const Text('إيقاف الانتظار'),
+                      ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String get _visibleMessage {
+    final place = pickupStop == null ? 'موقعك' : 'قرب ${pickupStop!.nameAr}';
+    final source =
+        usingCurrentLocation ? 'من موقعك الحالي' : 'من اختيارك اليدوي';
+    return 'نقطة انتظارك ظاهرة للسائق $place، وتتحدث $source.';
+  }
+}
+
 class _WaitingActionBar extends StatelessWidget {
   const _WaitingActionBar({
     required this.onOpenMap,
@@ -828,6 +1049,7 @@ class _WaitingHeader extends StatelessWidget {
     required this.locating,
     required this.hasLocationError,
     required this.waitStatus,
+    required this.waitIsVisible,
     required this.trackingIsStale,
   });
 
@@ -837,6 +1059,7 @@ class _WaitingHeader extends StatelessWidget {
   final bool locating;
   final bool hasLocationError;
   final String? waitStatus;
+  final bool waitIsVisible;
   final bool trackingIsStale;
 
   @override
@@ -851,15 +1074,17 @@ class _WaitingHeader extends StatelessWidget {
                 : '${arrival!.etaMinutes}';
     final etaLabel = waitStatus == 'boarded'
         ? 'اعتبرناك صعدت، شلنا نقطة انتظارك من السائق'
-        : trackingIsStale
-            ? 'التتبع متأخر، الوقت تقريبي'
-            : locating
-                ? 'دا نحدد موقعك'
-                : hasLocationError
-                    ? 'الموقع يحتاج تحديث'
-                    : arrival == null
-                        ? 'بانتظار ظهور كية'
-                        : 'دقيقة وتوصل لمكانك';
+        : waitIsVisible
+            ? 'أنت ظاهر للسائقين على هذا الخط'
+            : trackingIsStale
+                ? 'التتبع متأخر، الوقت تقريبي'
+                : locating
+                    ? 'دا نحدد موقعك'
+                    : hasLocationError
+                        ? 'الموقع يحتاج تحديث'
+                        : arrival == null
+                            ? 'بانتظار ظهور كية'
+                            : 'دقيقة وتوصل لمكانك';
 
     return Container(
       padding: const EdgeInsets.all(18),
@@ -939,6 +1164,13 @@ class _WaitingHeader extends StatelessWidget {
       ),
     );
   }
+}
+
+String _relativeArabic(DateTime dateTime) {
+  final difference = DateTime.now().difference(dateTime);
+  if (difference.inSeconds < 45) return 'ثواني';
+  if (difference.inMinutes < 60) return '${difference.inMinutes} دقيقة';
+  return '${difference.inHours} ساعة';
 }
 
 class _StatusLine extends StatelessWidget {

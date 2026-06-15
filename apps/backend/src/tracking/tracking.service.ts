@@ -1,6 +1,10 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import {
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
-import { Repository } from "typeorm";
+import { MoreThan, Repository } from "typeorm";
 import { PassengerWaitStatus } from "../common/enums/transit.enums";
 import { TransitRoute } from "../routes/route.entity";
 import { Stop } from "../stops/stop.entity";
@@ -14,6 +18,7 @@ import { Vehicle } from "./vehicle.entity";
 
 export interface VehicleLocationPayload {
   vehicleId: string;
+  operatorId: string;
   lat: number;
   lng: number;
   speedMetersPerSecond?: number;
@@ -34,6 +39,7 @@ export class TrackingService {
       where: { id: payload.vehicleId },
     });
     if (!vehicle) throw new NotFoundException("Vehicle not found");
+    this.ensureVehicleOperator(vehicle, payload.operatorId);
     vehicle.lastLocation = {
       type: "Point",
       coordinates: [payload.lng, payload.lat],
@@ -47,6 +53,41 @@ export class TrackingService {
     vehicle.lastSeenAt = new Date();
     vehicle.isTrackingActive = true;
     return this.vehicles.save(vehicle);
+  }
+
+  async listRouteVehicles(routeId: string) {
+    await this.ensureRouteExists(routeId);
+    const vehicles = await this.vehicles.find({
+      where: { routeId },
+      order: { lastSeenAt: "DESC", plateNumber: "ASC" },
+    });
+    return vehicles.map((vehicle) => this.vehicleSummary(vehicle));
+  }
+
+  async createDriverVehicle(
+    routeId: string,
+    plateNumber: string | undefined,
+    operatorId: string,
+  ) {
+    await this.ensureRouteExists(routeId);
+    const cleanPlate = plateNumber?.trim() || `كية ${Date.now()}`;
+    const vehicle = await this.vehicles.save(
+      this.vehicles.create({
+        routeId,
+        operatorId,
+        plateNumber: cleanPlate,
+        isTrackingActive: false,
+      }),
+    );
+    return this.vehicleSummary(vehicle);
+  }
+
+  async stopVehicleTracking(vehicleId: string, operatorId: string) {
+    const vehicle = await this.vehicles.findOne({ where: { id: vehicleId } });
+    if (!vehicle) throw new NotFoundException("Vehicle not found");
+    this.ensureVehicleOperator(vehicle, operatorId);
+    vehicle.isTrackingActive = false;
+    return this.vehicleSummary(await this.vehicles.save(vehicle));
   }
 
   async getRouteArrival(routeId: string, query: RouteArrivalQueryDto) {
@@ -278,9 +319,15 @@ export class TrackingService {
   }
 
   async getActivePassengerWaits(routeId: string) {
+    const activeSince = new Date(Date.now() - 10 * 60 * 1000);
     const waits = await this.passengerWaits.find({
-      where: { routeId, status: PassengerWaitStatus.Waiting },
-      order: { createdAt: "DESC" },
+      where: {
+        routeId,
+        status: PassengerWaitStatus.Waiting,
+        updatedAt: MoreThan(activeSince),
+      },
+      order: { updatedAt: "DESC" },
+      take: 25,
     });
     return waits.map((wait) => ({
       id: wait.id,
@@ -291,6 +338,30 @@ export class TrackingService {
       createdAt: wait.createdAt,
       updatedAt: wait.updatedAt,
     }));
+  }
+
+  private async ensureRouteExists(routeId: string) {
+    const count = await this.routes.count({ where: { id: routeId } });
+    if (count === 0) throw new NotFoundException("Route not found");
+  }
+
+  private vehicleSummary(vehicle: Vehicle) {
+    return {
+      id: vehicle.id,
+      routeId: vehicle.routeId,
+      plateNumber: vehicle.plateNumber,
+      isTrackingActive: vehicle.isTrackingActive,
+      lat: vehicle.lastLocation?.coordinates[1] ?? null,
+      lng: vehicle.lastLocation?.coordinates[0] ?? null,
+      speedMetersPerSecond: vehicle.speedMetersPerSecond,
+      lastSeenAt: vehicle.lastSeenAt,
+    };
+  }
+
+  private ensureVehicleOperator(vehicle: Vehicle, operatorId: string) {
+    if (vehicle.operatorId !== operatorId) {
+      throw new ForbiddenException("Vehicle belongs to another operator");
+    }
   }
 
   private async routeWithStops(routeId: string) {
