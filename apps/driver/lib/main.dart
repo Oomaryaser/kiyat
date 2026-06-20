@@ -121,15 +121,12 @@ class DriverAuthScreen extends StatefulWidget {
 
 class _DriverAuthScreenState extends State<DriverAuthScreen> {
   final phoneController = TextEditingController(text: '+964');
-  final otpController = TextEditingController();
-  bool otpSent = false;
   bool loading = false;
   String? error;
 
   @override
   void dispose() {
     phoneController.dispose();
-    otpController.dispose();
     super.dispose();
   }
 
@@ -156,25 +153,9 @@ class _DriverAuthScreenState extends State<DriverAuthScreen> {
               filled: true,
               border: OutlineInputBorder(),
             ),
-            textInputAction: TextInputAction.next,
+            textInputAction: TextInputAction.done,
+            onSubmitted: (_) => _devLogin(),
           ),
-          if (otpSent) ...[
-            const SizedBox(height: 12),
-            TextField(
-              controller: otpController,
-              keyboardType: TextInputType.number,
-              maxLength: 6,
-              decoration: const InputDecoration(
-                labelText: 'رمز الدخول',
-                prefixIcon: Icon(Icons.password_outlined),
-                filled: true,
-                border: OutlineInputBorder(),
-                counterText: '',
-              ),
-              textInputAction: TextInputAction.done,
-              onSubmitted: (_) => _verifyOtp(),
-            ),
-          ],
           if (error != null) ...[
             const SizedBox(height: 12),
             _StatePanel(
@@ -189,28 +170,22 @@ class _DriverAuthScreenState extends State<DriverAuthScreen> {
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: FilledButton.icon(
-            onPressed: loading ? null : (otpSent ? _verifyOtp : _sendOtp),
+            onPressed: loading ? null : _devLogin,
             icon: loading
                 ? const SizedBox(
                     width: 18,
                     height: 18,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : Icon(otpSent ? Icons.login : Icons.sms_outlined),
-            label: Text(
-              loading
-                  ? 'انتظر...'
-                  : otpSent
-                  ? 'دخول'
-                  : 'إرسال الرمز',
-            ),
+                : const Icon(Icons.login),
+            label: Text(loading ? 'انتظر...' : 'دخول تجريبي'),
           ),
         ),
       ),
     );
   }
 
-  Future<void> _sendOtp() async {
+  Future<void> _devLogin() async {
     final phone = phoneController.text.trim();
     if (phone.length < 8) {
       setState(() => error = 'اكتب رقم هاتف صحيح.');
@@ -221,32 +196,7 @@ class _DriverAuthScreenState extends State<DriverAuthScreen> {
       error = null;
     });
     try {
-      await widget.repository.sendOtp(phone);
-      if (!mounted) return;
-      setState(() => otpSent = true);
-    } on DriverRepositoryException catch (exception) {
-      setState(() => error = exception.message);
-    } finally {
-      if (mounted) setState(() => loading = false);
-    }
-  }
-
-  Future<void> _verifyOtp() async {
-    final phone = phoneController.text.trim();
-    final otp = otpController.text.trim();
-    if (otp.length != 6) {
-      setState(() => error = 'رمز الدخول يتكون من ٦ أرقام.');
-      return;
-    }
-    setState(() {
-      loading = true;
-      error = null;
-    });
-    try {
-      final session = await widget.repository.verifyDriverOtp(
-        phone: phone,
-        otp: otp,
-      );
+      final session = await widget.repository.devDriverLogin(phone: phone);
       if (!mounted) return;
       widget.onSignedIn(session);
     } on DriverRepositoryException catch (exception) {

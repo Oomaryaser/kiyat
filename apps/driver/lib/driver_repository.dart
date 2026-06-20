@@ -74,6 +74,11 @@ class DriverRepository {
     }
   }
 
+  Future<DriverSession> devDriverLogin({required String phone}) async {
+    await sendOtp(phone);
+    return verifyDriverOtp(phone: phone, otp: '123456');
+  }
+
   Future<void> saveSession(DriverSession session) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_accessTokenKey, session.accessToken);
