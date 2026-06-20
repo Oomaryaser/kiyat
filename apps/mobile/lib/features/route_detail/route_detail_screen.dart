@@ -38,6 +38,7 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
   String? lastSelectedVehicleLabel;
   String? persistedRouteId;
   bool arrivalNoticeShown = false;
+  RouteArrivalSnapshot? _lastArrivalSnapshot;
   StreamSubscription<Position>? _positionSubscription;
   Timer? _arrivalRefreshTimer;
   Timer? _waitHeartbeatTimer;
@@ -103,11 +104,14 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
               lng: effectivePickupLng ?? pickupStop.lng,
               pickupStopId: pickupStop.id.isEmpty ? null : pickupStop.id,
             )))
-            .maybeWhen(
-              data: (snapshot) => snapshot,
-              orElse: RouteArrivalSnapshot.fallback,
-            );
-    final arrival = arrivalSnapshot?.selectedVehicle;
+            .valueOrNull;
+
+    if (arrivalSnapshot != null) {
+      _lastArrivalSnapshot = arrivalSnapshot;
+    }
+
+    final effectiveSnapshot = arrivalSnapshot ?? _lastArrivalSnapshot;
+    final arrival = effectiveSnapshot?.selectedVehicle;
     final alertsEnabled = ref.watch(passengerSettingsProvider).maybeWhen(
           data: (settings) => settings.arrivalAlertsEnabled,
           orElse: () => true,
@@ -120,8 +124,8 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
       arrival,
       alertsEnabled,
     );
-    final nearbyVehicles = arrivalSnapshot?.vehicles ?? sampleVehicles;
-    final skippedCount = arrivalSnapshot?.skippedPassedVehicles.length ??
+    final nearbyVehicles = effectiveSnapshot?.vehicles ?? sampleVehicles;
+    final skippedCount = effectiveSnapshot?.skippedPassedVehicles.length ??
         sampleVehicles.where((vehicle) => vehicle.hasPassedPickup).length;
     final trackingIsStale = _trackingIsStale(arrival);
 
@@ -136,6 +140,30 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
           ),
         ],
       ),
+      bottomNavigationBar: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 14),
+          child: Row(
+            children: [
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: () => context.push('/map'),
+                  icon: const Icon(Icons.map_outlined),
+                  label: const Text('الخريطة الحية'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _stopWaiting,
+                  icon: const Icon(Icons.stop_circle_outlined),
+                  label: const Text('إيقاف الانتظار'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -148,6 +176,23 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
             waitStatus: waitStatus,
             waitIsVisible: _waitIsVisible,
             trackingIsStale: trackingIsStale,
+          ),
+          const SizedBox(height: 12),
+          _PassengerNextStepCard(
+            waitIsVisible: _waitIsVisible,
+            waitSyncError: waitSyncError,
+            locating: locating,
+            arrival: arrival,
+            pickupStop: pickupStop,
+            trackingIsStale: trackingIsStale,
+            onRetry: effectivePickupLat == null || effectivePickupLng == null
+                ? null
+                : () => _startPassengerWait(
+                      route.id,
+                      effectivePickupLat,
+                      effectivePickupLng,
+                    ).then((_) => _startLocationStream()),
+            onUseCurrentLocation: () => _useCurrentLocation(stops, route.id),
           ),
           const SizedBox(height: 12),
           _WaitVisibilityCard(
@@ -183,11 +228,6 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
             onOpenLocationSettings: _openLocationSettings,
           ),
           const SizedBox(height: 12),
-          _WaitingActionBar(
-            onOpenMap: () => context.push('/map'),
-            onStopWaiting: _stopWaiting,
-          ),
-          const SizedBox(height: 12),
           _RouteDetailsPanel(
             route: route,
             stops: stops,
@@ -198,7 +238,7 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
               builder: (_) => ReportBottomSheet(routeId: route.id),
             ),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 92),
         ],
       ),
     );
@@ -380,6 +420,7 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
       final position = await Geolocator.getCurrentPosition();
       final nearestIndex =
           _nearestStopIndex(stops, position.latitude, position.longitude);
+      if (!mounted) return;
       setState(() {
         pickupStopIndex = nearestIndex;
         usingCurrentLocation = true;
@@ -387,13 +428,16 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
         pickupLng = position.longitude;
       });
       await _startPassengerWait(routeId, position.latitude, position.longitude);
+      if (!mounted) return;
       _startLocationStream();
     } on LocationServiceDisabledException {
+      if (!mounted) return;
       setState(() {
         locationIssue = _LocationIssue.serviceDisabled;
         locationError = 'خدمة الموقع مطفية. شغلها حتى نحدد أقرب كية عليك.';
       });
     } on PermissionDeniedException catch (error) {
+      if (!mounted) return;
       final deniedForever =
           error.message == LocationPermission.deniedForever.name;
       setState(() {
@@ -405,6 +449,7 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
             : 'نحتاج صلاحية الموقع حتى نعرف وين تنتظر على الخط.';
       });
     } catch (_) {
+      if (!mounted) return;
       setState(() {
         locationIssue = _LocationIssue.unknown;
         locationError =
@@ -467,8 +512,8 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
     _arrivalRefreshTimer?.cancel();
     _arrivalRefreshTimer = null;
     await repository.clearActiveWaitRouteId();
-    ref.invalidate(activeWaitRouteIdProvider);
     if (!mounted) return;
+    ref.invalidate(activeWaitRouteIdProvider);
     setState(() {
       waitSessionId = null;
       waitStatus = 'cancelled';
@@ -886,6 +931,153 @@ enum _LocationIssue {
   unknown,
 }
 
+class _PassengerNextStepCard extends StatelessWidget {
+  const _PassengerNextStepCard({
+    required this.waitIsVisible,
+    required this.waitSyncError,
+    required this.locating,
+    required this.arrival,
+    required this.pickupStop,
+    required this.trackingIsStale,
+    required this.onRetry,
+    required this.onUseCurrentLocation,
+  });
+
+  final bool waitIsVisible;
+  final String? waitSyncError;
+  final bool locating;
+  final VehicleArrivalEstimate? arrival;
+  final TransitStop? pickupStop;
+  final bool trackingIsStale;
+  final VoidCallback? onRetry;
+  final VoidCallback onUseCurrentLocation;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final title = _title;
+    final subtitle = _subtitle;
+    final icon = _icon;
+    final color = _color(colors);
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.09),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: color.withValues(alpha: 0.22)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.14),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(icon, color: color, size: 28),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w900,
+                          ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      subtitle,
+                      style: TextStyle(color: Colors.grey.shade800),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          if (waitSyncError != null || locating) ...[
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: FilledButton.tonalIcon(
+                    onPressed: locating ? null : onUseCurrentLocation,
+                    icon: locating
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.my_location),
+                    label: Text(locating ? 'دا نحدد...' : 'حدث موقعي'),
+                  ),
+                ),
+                if (waitSyncError != null) ...[
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: onRetry,
+                      icon: const Icon(Icons.visibility_outlined),
+                      label: const Text('أظهرني للسائق'),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  String get _title {
+    if (locating) return 'نثبت موقعك';
+    if (waitSyncError != null) return 'أنت غير ظاهر للسائق';
+    if (!waitIsVisible) return 'دا نظهرك للسائق';
+    if (arrival == null) return 'أنت ظاهر، انتظر كية';
+    if (trackingIsStale) return 'الكية ظاهرة بس التحديث متأخر';
+    if (arrival!.etaMinutes <= 2) return 'جهز، الكية قريبة';
+    return 'أنت ظاهر، الكية بالطريق';
+  }
+
+  String get _subtitle {
+    if (locating) return 'خلي الموقع مفتوح حتى نحدد أقرب نقطة صعود.';
+    if (waitSyncError != null) return waitSyncError!;
+    if (!waitIsVisible) return 'نرسل موقع انتظارك للسائقين على هذا الخط.';
+    final place =
+        pickupStop == null ? 'مكانك الحالي' : 'قرب ${pickupStop!.nameAr}';
+    if (arrival == null) {
+      return 'السائقين يشوفونك عند $place. أول كية تظهر راح نعرضها هنا.';
+    }
+    return '${arrival!.vehicleLabel} تبعد ${arrival!.distanceMeters} م وتوصل خلال ${arrival!.etaMinutes} دقيقة تقريباً.';
+  }
+
+  IconData get _icon {
+    if (locating) return Icons.my_location;
+    if (waitSyncError != null) return Icons.visibility_off_outlined;
+    if (!waitIsVisible) return Icons.sync_outlined;
+    if (arrival == null) return Icons.visibility_outlined;
+    if (arrival!.etaMinutes <= 2) return Icons.notifications_active_outlined;
+    return Icons.directions_bus_filled;
+  }
+
+  Color _color(ColorScheme colors) {
+    if (waitSyncError != null) return colors.error;
+    if (locating || !waitIsVisible) return Colors.orange.shade800;
+    if (arrival != null && arrival!.etaMinutes <= 2) {
+      return Colors.blue.shade700;
+    }
+    return colors.primary;
+  }
+}
+
 class _WaitVisibilityCard extends StatelessWidget {
   const _WaitVisibilityCard({
     required this.waitStatus,
@@ -1004,40 +1196,6 @@ class _WaitVisibilityCard extends StatelessWidget {
     final source =
         usingCurrentLocation ? 'من موقعك الحالي' : 'من اختيارك اليدوي';
     return 'نقطة انتظارك ظاهرة للسائق $place، وتتحدث $source.';
-  }
-}
-
-class _WaitingActionBar extends StatelessWidget {
-  const _WaitingActionBar({
-    required this.onOpenMap,
-    required this.onStopWaiting,
-  });
-
-  final VoidCallback onOpenMap;
-  final VoidCallback onStopWaiting;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    return Row(
-      children: [
-        Expanded(
-          child: FilledButton.icon(
-            onPressed: onOpenMap,
-            icon: const Icon(Icons.map_outlined),
-            label: const Text('عرض الخريطة'),
-          ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: OutlinedButton.icon(
-            onPressed: onStopWaiting,
-            icon: Icon(Icons.stop_circle_outlined, color: colors.error),
-            label: const Text('إيقاف الانتظار'),
-          ),
-        ),
-      ],
-    );
   }
 }
 

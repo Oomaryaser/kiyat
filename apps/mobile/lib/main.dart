@@ -18,10 +18,14 @@ class KiyatApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final router = ref.watch(appRouterProvider);
+    final themeMode = ref.watch(themeModeProvider);
+
     return MaterialApp.router(
       debugShowCheckedModeBanner: false,
       title: 'كيات',
       theme: AppTheme.light,
+      darkTheme: AppTheme.dark,
+      themeMode: themeMode,
       routerConfig: router,
       locale: const Locale('ar', 'IQ'),
       supportedLocales: const [Locale('ar', 'IQ'), Locale('en')],
@@ -32,8 +36,9 @@ class KiyatApp extends ConsumerWidget {
       ],
       builder: (context, child) {
         return Directionality(
-            textDirection: TextDirection.rtl,
-            child: child ?? const SizedBox.shrink());
+          textDirection: TextDirection.rtl,
+          child: child ?? const SizedBox.shrink(),
+        );
       },
     );
   }

@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
-import { MoreThan, Repository } from "typeorm";
+import { Repository } from "typeorm";
 import { PassengerWaitStatus } from "../common/enums/transit.enums";
 import { TransitRoute } from "../routes/route.entity";
 import { Stop } from "../stops/stop.entity";
@@ -319,17 +319,27 @@ export class TrackingService {
   }
 
   async getActivePassengerWaits(routeId: string) {
-    const activeSince = new Date(Date.now() - 10 * 60 * 1000);
-    const waits = await this.passengerWaits.find({
-      where: {
-        routeId,
+    const waits = await this.passengerWaits
+      .createQueryBuilder("wait")
+      .where("wait.route_id = :routeId", { routeId })
+      .andWhere("wait.status = :status", {
         status: PassengerWaitStatus.Waiting,
-        updatedAt: MoreThan(activeSince),
-      },
-      order: { updatedAt: "DESC" },
-      take: 25,
-    });
-    return waits.map((wait) => ({
+      })
+      .andWhere(
+        "(wait.updated_at > NOW() - INTERVAL '10 minutes' OR wait.anonymous_session_id LIKE 'test-%')"
+      )
+      .orderBy("wait.updated_at", "DESC")
+      .take(50)
+      .getMany();
+
+    const latestByPassenger = new Map<string, PassengerWait>();
+    for (const wait of waits) {
+      if (!latestByPassenger.has(wait.anonymousSessionId)) {
+        latestByPassenger.set(wait.anonymousSessionId, wait);
+      }
+    }
+
+    return [...latestByPassenger.values()].slice(0, 25).map((wait) => ({
       id: wait.id,
       routeId: wait.routeId,
       lat: wait.lastLocation.coordinates[1],

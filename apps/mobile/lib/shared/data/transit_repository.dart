@@ -149,6 +149,25 @@ class TransitRepository {
     }
   }
 
+  Future<bool> submitReport({
+    required String routeId,
+    required String reportType,
+    required String description,
+  }) async {
+    try {
+      final reporterId = await _anonymousSessionId();
+      await _dio.post<Map<String, dynamic>>('/reports', data: {
+        'routeId': routeId,
+        'reporterId': reporterId,
+        'reportType': reportType,
+        'description': description,
+      });
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<String?> loadActiveWaitRouteId() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString('active_wait_route_id');

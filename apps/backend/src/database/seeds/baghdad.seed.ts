@@ -1,7 +1,7 @@
 import 'reflect-metadata';
 import { DataSource } from 'typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { RouteStatus, RouteType, StopType } from '../../common/enums/transit.enums';
+import { RouteStatus, RouteType, StopType, PassengerWaitStatus } from '../../common/enums/transit.enums';
 import { TransitRoute } from '../../routes/route.entity';
 import { RouteStop } from '../../routes/route-stop.entity';
 import { Stop } from '../../stops/stop.entity';
@@ -9,6 +9,7 @@ import { User } from '../../users/user.entity';
 import { Vehicle } from '../../tracking/vehicle.entity';
 import { CommunityReport } from '../../reports/community-report.entity';
 import { SavedRoute } from '../../saved-routes/saved-route.entity';
+import { PassengerWait } from '../../tracking/passenger-wait.entity';
 
 ConfigModule.forRoot();
 const config = new ConfigService();
@@ -16,7 +17,7 @@ const config = new ConfigService();
 const dataSource = new DataSource({
   type: 'postgres',
   url: config.getOrThrow<string>('DATABASE_URL'),
-  entities: [TransitRoute, Stop, RouteStop, Vehicle, User, CommunityReport, SavedRoute],
+  entities: [TransitRoute, Stop, RouteStop, Vehicle, User, CommunityReport, SavedRoute, PassengerWait],
   synchronize: true,
 });
 
@@ -78,6 +79,7 @@ async function seed() {
   const stopRepo = dataSource.getRepository(Stop);
   const routeStopRepo = dataSource.getRepository(RouteStop);
   const vehicleRepo = dataSource.getRepository(Vehicle);
+  const passengerWaitRepo = dataSource.getRepository(PassengerWait);
 
   for (const routeData of routes) {
     const route = await routeRepo.save(
@@ -134,6 +136,21 @@ async function seed() {
         lastLocation: { type: 'Point', coordinates: [Number(secondStop[3]), Number(secondStop[2])] },
       }),
     ]);
+
+    // Add two static test passenger waits at intermediate stops
+    const stopsToWait = routeData.stops.slice(1, -1);
+    for (const [idx, stopData] of stopsToWait.entries()) {
+      const [nameAr, nameEn, lat, lng] = stopData;
+      await passengerWaitRepo.save(
+        passengerWaitRepo.create({
+          route,
+          anonymousSessionId: `test-passenger-${routeData.nameEn.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${idx + 1}`,
+          pickupLocation: { type: 'Point', coordinates: [Number(lng), Number(lat)] },
+          lastLocation: { type: 'Point', coordinates: [Number(lng), Number(lat)] },
+          status: PassengerWaitStatus.Waiting,
+        })
+      );
+    }
   }
 
   await dataSource.destroy();

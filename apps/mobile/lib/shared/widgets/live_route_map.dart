@@ -297,51 +297,89 @@ class _LiveRouteMapState extends State<LiveRouteMap>
   Future<void> _loadGoogleRoute() async {
     final fallback =
         widget.stops.map((stop) => LatLng(stop.lat, stop.lng)).toList();
-    if (_directionsApiKey.isEmpty || widget.stops.length < 2) {
+    if (widget.stops.length < 2) {
       setState(() => _roadRoute = fallback);
       return;
     }
 
-    final origin = widget.stops.first;
-    final destination = widget.stops.last;
-    final waypoints = widget.stops.length > 2
-        ? widget.stops
-            .sublist(1, widget.stops.length - 1)
-            .map((stop) => '${stop.lat},${stop.lng}')
-            .join('|')
-        : null;
-    final query = {
-      'origin': '${origin.lat},${origin.lng}',
-      'destination': '${destination.lat},${destination.lng}',
-      'mode': 'driving',
-      'key': _directionsApiKey,
-      if (waypoints != null) 'waypoints': waypoints,
-    };
-    final uri =
-        Uri.https('maps.googleapis.com', '/maps/api/directions/json', query);
-
+    // Try OSRM routing first
     try {
-      final response = await http.get(uri).timeout(const Duration(seconds: 8));
-      if (response.statusCode != 200) {
-        setState(() => _roadRoute = fallback);
-        return;
+      final coordsString = widget.stops
+          .map((stop) => '${stop.lng},${stop.lat}')
+          .join(';');
+      final uri = Uri.https(
+        'router.project-osrm.org',
+        '/route/v1/driving/$coordsString',
+        {'overview': 'full', 'geometries': 'geojson'},
+      );
+      final response = await http.get(uri).timeout(const Duration(seconds: 6));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        final routes = data['routes'] as List<dynamic>? ?? const [];
+        final geometry = routes.firstOrNull?['geometry'] as Map<String, dynamic>?;
+        final coordinates = geometry?['coordinates'] as List<dynamic>? ?? const [];
+        final points = coordinates
+            .whereType<List<dynamic>>()
+            .where((point) => point.length >= 2)
+            .map(
+              (point) => LatLng(
+                (point[1] as num).toDouble(),
+                (point[0] as num).toDouble(),
+              ),
+            )
+            .toList();
+        if (points.length > 1) {
+          setState(() => _roadRoute = points);
+          await _fitCamera(points);
+          return;
+        }
       }
-
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
-      final routes = data['routes'] as List<dynamic>?;
-      final encoded =
-          routes?.firstOrNull?['overview_polyline']?['points'] as String?;
-      if (encoded == null || encoded.isEmpty) {
-        setState(() => _roadRoute = fallback);
-        return;
-      }
-
-      final decoded = _decodePolyline(encoded);
-      setState(() => _roadRoute = decoded.isEmpty ? fallback : decoded);
-      await _fitCamera(decoded.isEmpty ? fallback : decoded);
     } catch (_) {
-      setState(() => _roadRoute = fallback);
+      // Ignore and fallback to Google Directions or straight lines
     }
+
+    // Fallback to Google Directions if API Key is available
+    if (_directionsApiKey.isNotEmpty) {
+      final origin = widget.stops.first;
+      final destination = widget.stops.last;
+      final waypoints = widget.stops.length > 2
+          ? widget.stops
+              .sublist(1, widget.stops.length - 1)
+              .map((stop) => '${stop.lat},${stop.lng}')
+              .join('|')
+          : null;
+      final query = {
+        'origin': '${origin.lat},${origin.lng}',
+        'destination': '${destination.lat},${destination.lng}',
+        'mode': 'driving',
+        'key': _directionsApiKey,
+        if (waypoints != null) 'waypoints': waypoints,
+      };
+      final uri =
+          Uri.https('maps.googleapis.com', '/maps/api/directions/json', query);
+
+      try {
+        final response = await http.get(uri).timeout(const Duration(seconds: 8));
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body) as Map<String, dynamic>;
+          final routes = data['routes'] as List<dynamic>?;
+          final encoded =
+              routes?.firstOrNull?['overview_polyline']?['points'] as String?;
+          if (encoded != null && encoded.isNotEmpty) {
+            final decoded = _decodePolyline(encoded);
+            if (decoded.isNotEmpty) {
+              setState(() => _roadRoute = decoded);
+              await _fitCamera(decoded);
+              return;
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
+    // Ultimate fallback: straight lines connecting stops
+    setState(() => _roadRoute = fallback);
+    await _fitCamera(fallback);
   }
 
   Future<void> _fitCamera(List<LatLng> routePoints) async {

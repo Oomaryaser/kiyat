@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/theme/app_theme.dart';
 import '../../shared/data/transit_repository.dart';
 import '../../shared/settings/passenger_settings.dart';
 
@@ -13,6 +14,7 @@ class SettingsScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final settingsAsync = ref.watch(passengerSettingsProvider);
     final controller = ref.watch(passengerSettingsControllerProvider);
+    final themeMode = ref.watch(themeModeProvider);
 
     return Scaffold(
       appBar: AppBar(title: const Text('الإعدادات')),
@@ -41,6 +43,22 @@ class SettingsScreen extends ConsumerWidget {
             ),
             loading: () => const Center(child: CircularProgressIndicator()),
             error: (_, __) => const SizedBox.shrink(),
+          ),
+          const SizedBox(height: 12),
+          _SettingsSection(
+            children: [
+              ListTile(
+                leading: const Icon(Icons.dark_mode_outlined),
+                title: const Text('مظهر التطبيق'),
+                subtitle: Text(switch (themeMode) {
+                  ThemeMode.system => 'تلقائي حسب الجهاز',
+                  ThemeMode.light => 'فاتح',
+                  ThemeMode.dark => 'داكن',
+                }),
+                trailing: const Icon(Icons.chevron_left),
+                onTap: () => _showThemeDialog(context, ref),
+              ),
+            ],
           ),
           const SizedBox(height: 12),
           _SettingsSection(
@@ -82,6 +100,71 @@ class SettingsScreen extends ConsumerWidget {
     );
   }
 
+  void _showThemeDialog(BuildContext context, WidgetRef ref) {
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('مظهر التطبيق'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              title: const Text('تلقائي حسب الجهاز'),
+              leading: Radio<ThemeMode>(
+                value: ThemeMode.system,
+                groupValue: ref.watch(themeModeProvider),
+                onChanged: (mode) {
+                  if (mode != null) {
+                    ref.read(themeModeProvider.notifier).setThemeMode(mode);
+                    Navigator.pop(context);
+                  }
+                },
+              ),
+              onTap: () {
+                ref.read(themeModeProvider.notifier).setThemeMode(ThemeMode.system);
+                Navigator.pop(context);
+              },
+            ),
+            ListTile(
+              title: const Text('فاتح'),
+              leading: Radio<ThemeMode>(
+                value: ThemeMode.light,
+                groupValue: ref.watch(themeModeProvider),
+                onChanged: (mode) {
+                  if (mode != null) {
+                    ref.read(themeModeProvider.notifier).setThemeMode(mode);
+                    Navigator.pop(context);
+                  }
+                },
+              ),
+              onTap: () {
+                ref.read(themeModeProvider.notifier).setThemeMode(ThemeMode.light);
+                Navigator.pop(context);
+              },
+            ),
+            ListTile(
+              title: const Text('داكن'),
+              leading: Radio<ThemeMode>(
+                value: ThemeMode.dark,
+                groupValue: ref.watch(themeModeProvider),
+                onChanged: (mode) {
+                  if (mode != null) {
+                    ref.read(themeModeProvider.notifier).setThemeMode(mode);
+                    Navigator.pop(context);
+                  }
+                },
+              ),
+              onTap: () {
+                ref.read(themeModeProvider.notifier).setThemeMode(ThemeMode.dark);
+                Navigator.pop(context);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _clearWait(BuildContext context, WidgetRef ref) async {
     final repository = ref.read(transitRepositoryProvider);
     final waitId = await repository.loadActiveWaitSessionId();
@@ -106,7 +189,7 @@ class _SettingsSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: Colors.white,
+      color: Theme.of(context).cardTheme.color,
       borderRadius: BorderRadius.circular(14),
       clipBehavior: Clip.antiAlias,
       shape: RoundedRectangleBorder(
