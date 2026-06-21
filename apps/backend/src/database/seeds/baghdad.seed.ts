@@ -11,7 +11,7 @@ import { CommunityReport } from '../../reports/community-report.entity';
 import { SavedRoute } from '../../saved-routes/saved-route.entity';
 import { PassengerWait } from '../../tracking/passenger-wait.entity';
 
-ConfigModule.forRoot();
+ConfigModule.forRoot({ envFilePath: ['.env', '../../.env'] });
 const config = new ConfigService();
 
 const dataSource = new DataSource({

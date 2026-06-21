@@ -86,11 +86,6 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
     final stops = detail.stops.isEmpty ? sampleStops : detail.stops;
     if (persistedRouteId != route.id) {
       persistedRouteId = route.id;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        ref.read(transitRepositoryProvider).saveActiveWaitRouteId(route.id);
-        ref.invalidate(activeWaitRouteIdProvider);
-      });
     }
     if (!autoLocateRequested) {
       autoLocateRequested = true;
@@ -134,9 +129,15 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
         sampleVehicles.where((vehicle) => vehicle.hasPassedPickup).length;
     final trackingIsStale = _trackingIsStale(arrival);
 
+    final savedActiveRouteId = ref.watch(activeWaitRouteIdProvider).maybeWhen(
+          data: (routeId) => routeId,
+          orElse: () => null,
+        );
+    final isWaitingForThisRoute = savedActiveRouteId == route.id;
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('انتظار الخط'),
+        title: const Text('تفاصيل الخط'),
         actions: [
           IconButton(
             onPressed: () => _toggleSaved(route.id, !saved),
@@ -158,13 +159,28 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
                 ),
               ),
               const SizedBox(width: 10),
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: _stopWaiting,
-                  icon: const Icon(Icons.stop_circle_outlined),
-                  label: const Text('إيقاف الانتظار'),
+              if (isWaitingForThisRoute)
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _stopWaiting,
+                    icon: const Icon(Icons.stop_circle_outlined),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.red.shade700,
+                      side: BorderSide(color: Colors.red.shade200),
+                    ),
+                    label: const Text('إيقاف الانتظار'),
+                  ),
+                )
+              else
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: effectivePickupLat == null || effectivePickupLng == null
+                        ? null
+                        : () => _startPassengerWait(route.id, effectivePickupLat, effectivePickupLng),
+                    icon: const Icon(Icons.play_circle_fill_outlined),
+                    label: const Text('بدء الانتظار'),
+                  ),
                 ),
-              ),
             ],
           ),
         ),
@@ -172,57 +188,6 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          _WaitingHeader(
-            route: route,
-            arrival: arrival,
-            pickupStop: pickupStop,
-            locating: locating,
-            hasLocationError: locationError != null,
-            waitStatus: waitStatus,
-            waitIsVisible: _waitIsVisible,
-            trackingIsStale: trackingIsStale,
-            userLocation: userLat != null && userLng != null ? LatLng(userLat!, userLng!) : null,
-            nearestRoutePoint: pickupLat != null && pickupLng != null ? LatLng(pickupLat!, pickupLng!) : null,
-          ),
-          const SizedBox(height: 12),
-          _PassengerNextStepCard(
-            waitIsVisible: _waitIsVisible,
-            waitSyncError: waitSyncError,
-            locating: locating,
-            arrival: arrival,
-            pickupStop: pickupStop,
-            trackingIsStale: trackingIsStale,
-            userLocation: userLat != null && userLng != null ? LatLng(userLat!, userLng!) : null,
-            nearestRoutePoint: pickupLat != null && pickupLng != null ? LatLng(pickupLat!, pickupLng!) : null,
-            onRetry: effectivePickupLat == null || effectivePickupLng == null
-                ? null
-                : () => _startPassengerWait(
-                      route.id,
-                      effectivePickupLat,
-                      effectivePickupLng,
-                    ).then((_) => _startLocationStream(stops, route.id)),
-            onUseCurrentLocation: () => _useCurrentLocation(stops, route.id),
-          ),
-          const SizedBox(height: 12),
-          _WaitVisibilityCard(
-            waitStatus: waitStatus,
-            waitLastSyncedAt: waitLastSyncedAt,
-            waitSyncError: waitSyncError,
-            pickupStop: pickupStop,
-            usingCurrentLocation: usingCurrentLocation,
-            locating: locating,
-            userLocation: userLat != null && userLng != null ? LatLng(userLat!, userLng!) : null,
-            nearestRoutePoint: pickupLat != null && pickupLng != null ? LatLng(pickupLat!, pickupLng!) : null,
-            onRetry: effectivePickupLat == null || effectivePickupLng == null
-                ? null
-                : () => _startPassengerWait(
-                      route.id,
-                      effectivePickupLat,
-                      effectivePickupLng,
-                    ).then((_) => _startLocationStream(stops, route.id)),
-            onStopWaiting: _stopWaiting,
-          ),
-          const SizedBox(height: 12),
           _ArrivalCard(
             pickupStop: pickupStop,
             usingCurrentLocation: usingCurrentLocation,
@@ -263,11 +228,7 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
     return DateTime.now().difference(lastSeenAt.toLocal()).inMinutes >= 5;
   }
 
-  bool get _waitIsVisible {
-    return waitSessionId != null &&
-        waitStatus == 'waiting' &&
-        waitSyncError == null;
-  }
+
 
   Future<void> _toggleSaved(String routeId, bool saved) async {
     await ref.read(transitRepositoryProvider).setRouteSaved(routeId, saved);
@@ -520,6 +481,10 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
     await ref
         .read(transitRepositoryProvider)
         .saveActiveWaitSessionId(session.id);
+    await ref
+        .read(transitRepositoryProvider)
+        .saveActiveWaitRouteId(routeId);
+    ref.invalidate(activeWaitRouteIdProvider);
     _startWaitHeartbeat(lat, lng);
   }
 

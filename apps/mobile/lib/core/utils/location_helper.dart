@@ -10,9 +10,10 @@ class KiyatLocation {
   }
 
   static Position mockBaghdad(DateTime timestamp) {
+    // Offset the mock location slightly (approx 180m south-east) so there's walking distance to the first stop (33.3152, 44.4161)
     return Position(
-      latitude: defaultLat,
-      longitude: defaultLng,
+      latitude: defaultLat - 0.0012,
+      longitude: defaultLng + 0.0012,
       timestamp: timestamp,
       accuracy: 10.0,
       altitude: 34.0,

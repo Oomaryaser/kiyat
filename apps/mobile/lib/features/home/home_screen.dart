@@ -319,6 +319,18 @@ class _ActiveWaitingHome extends StatelessWidget {
   final VoidCallback onOpenLiveMap;
   final Future<void> Function() onStopWaiting;
 
+  int _pickupDistanceMeters() {
+    final position = currentPosition;
+    if (position == null || detail.stops.isEmpty) return 50;
+    final stop = detail.stops.first;
+    return Geolocator.distanceBetween(
+      position.latitude,
+      position.longitude,
+      stop.lat,
+      stop.lng,
+    ).round().clamp(35, 850);
+  }
+
   @override
   Widget build(BuildContext context) {
     final snapshot = arrivalAsync.maybeWhen(
@@ -330,6 +342,10 @@ class _ActiveWaitingHome extends StatelessWidget {
     final selectedVehicle = snapshot.selectedVehicle ?? vehicles.firstOrNull;
     final etaMinutes = selectedVehicle?.etaMinutes ?? 3;
     const confidence = 92;
+
+    final pickupDistance = _pickupDistanceMeters();
+    final walkingMinutes = (pickupDistance / 70).clamp(1, 8).ceil();
+    final showWalkingNavigation = pickupDistance > 30 && currentPosition != null;
 
     return Stack(
       children: [
@@ -346,27 +362,32 @@ class _ActiveWaitingHome extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
             child: Column(
               children: [
+                if (showWalkingNavigation) ...[
+                  _WalkingNavigationBanner(
+                    stopName: detail.stops.isNotEmpty ? detail.stops.first.nameAr : 'الموقف الأول',
+                    distanceMeters: pickupDistance,
+                    walkingMinutes: walkingMinutes,
+                  ),
+                  const SizedBox(height: 10),
+                ],
                 _WaitingHeroCard(
                   routeName: _routeDisplayName(detail),
                   etaMinutes: etaMinutes,
                   confidence: confidence,
                   isLoading: arrivalAsync.isLoading,
                 ),
-                const SizedBox(height: 10),
-                _LiveActivityStrip(vehicleCount: vehicles.length.clamp(5, 9)),
               ],
             ),
           ),
         ),
         PositionedDirectional(
           end: 18,
-          bottom: 382,
+          bottom: 176,
           child: _MapLocateButton(onTap: onUseCurrentLocation),
         ),
         _WaitingOperationsSheet(
           detail: detail,
           currentPosition: currentPosition,
-          onOpenLiveMap: onOpenLiveMap,
           onStopWaiting: onStopWaiting,
         ),
       ],
@@ -380,6 +401,112 @@ class _ActiveWaitingHome extends StatelessWidget {
       return '${detail.stops.first.nameAr} ← ${detail.stops.last.nameAr}';
     }
     return detail.route.nameAr;
+  }
+}
+
+class _WalkingNavigationBanner extends StatelessWidget {
+  const _WalkingNavigationBanner({
+    required this.stopName,
+    required this.distanceMeters,
+    required this.walkingMinutes,
+  });
+
+  final String stopName;
+  final int distanceMeters;
+  final int walkingMinutes;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [
+            Color(0xFF0F5132), // Google Maps dark green
+            Color(0xFF14532D), // slightly darker forest green
+          ],
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+        ),
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF0F5132).withValues(alpha: 0.25),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.all(16),
+      child: Directionality(
+        textDirection: TextDirection.rtl,
+        child: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.15),
+                shape: BoxShape.circle,
+              ),
+              child: const Center(
+                child: Icon(
+                  Icons.directions_walk_rounded,
+                  color: Colors.white,
+                  size: 26,
+                ),
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'اتجه سيراً نحو موقف الصعود: $stopName',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 14.5,
+                      fontWeight: FontWeight.w900,
+                      fontFamily: 'Tajawal',
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Row(
+                    children: [
+                      Text(
+                        '$distanceMeters متر · $walkingMinutes دقيقة مشياً',
+                        style: const TextStyle(
+                          color: Color(0xFFD1FAE5),
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w800,
+                          fontFamily: 'Tajawal',
+                        ),
+                      ),
+                      const Spacer(),
+                      const Icon(
+                        Icons.info_outline_rounded,
+                        color: Color(0xFFD1FAE5),
+                        size: 14,
+                      ),
+                      const SizedBox(width: 4),
+                      const Text(
+                        'اتبع المسار الأخضر المنقط',
+                        style: TextStyle(
+                          color: Color(0xFFD1FAE5),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          fontFamily: 'Tajawal',
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -399,9 +526,9 @@ class _WaitingHeroCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _GlassSurface(
-      radius: 32,
+      radius: 28,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(18, 16, 18, 17),
+        padding: const EdgeInsets.all(18),
         child: Directionality(
           textDirection: TextDirection.rtl,
           child: Column(
@@ -410,16 +537,16 @@ class _WaitingHeroCard extends StatelessWidget {
               Row(
                 children: [
                   Container(
-                    width: 42,
-                    height: 42,
+                    width: 38,
+                    height: 38,
                     decoration: BoxDecoration(
                       color: const Color(0xFF1B5E8B).withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(16),
+                      borderRadius: BorderRadius.circular(14),
                     ),
                     child: const Icon(
                       Icons.radar_rounded,
                       color: Color(0xFF1B5E8B),
-                      size: 23,
+                      size: 20,
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -433,18 +560,20 @@ class _WaitingHeroCard extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
                             color: Color(0xFF071827),
-                            fontSize: 18,
+                            fontSize: 16.5,
                             fontWeight: FontWeight.w900,
+                            fontFamily: 'Tajawal',
                             height: 1.1,
                           ),
                         ),
-                        const SizedBox(height: 4),
+                        const SizedBox(height: 3),
                         Text(
                           isLoading ? 'نحدث حركة الخط الآن' : 'أنت تنتظر الآن',
                           style: TextStyle(
                             color: Colors.grey.shade600,
-                            fontSize: 12,
+                            fontSize: 11.5,
                             fontWeight: FontWeight.w800,
+                            fontFamily: 'Tajawal',
                           ),
                         ),
                       ],
@@ -452,161 +581,33 @@ class _WaitingHeroCard extends StatelessWidget {
                   ),
                 ],
               ),
-              const SizedBox(height: 15),
+              const SizedBox(height: 14),
               Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   Text(
                     '$etaMinutes',
                     style: const TextStyle(
                       color: Color(0xFF071827),
-                      fontSize: 42,
+                      fontSize: 34,
                       fontWeight: FontWeight.w900,
                       height: 0.9,
                     ),
                   ),
-                  const SizedBox(width: 7),
-                  const Padding(
-                    padding: EdgeInsets.only(bottom: 3),
-                    child: Text(
-                      'دقائق',
-                      style: TextStyle(
-                        color: Color(0xFF071827),
-                        fontSize: 13,
-                        fontWeight: FontWeight.w900,
-                      ),
+                  const SizedBox(width: 8),
+                  const Text(
+                    'دقائق لأقرب كية',
+                    style: TextStyle(
+                      color: Color(0xFF173244),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w900,
+                      fontFamily: 'Tajawal',
                     ),
                   ),
-                  const Spacer(),
-                  _ConfidenceGauge(value: confidence),
                 ],
-              ),
-              const SizedBox(height: 11),
-              Text(
-                'أقرب كية خلال $etaMinutes دقائق',
-                style: const TextStyle(
-                  color: Color(0xFF173244),
-                  fontSize: 13,
-                  fontWeight: FontWeight.w800,
-                ),
               ),
             ],
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ConfidenceGauge extends StatelessWidget {
-  const _ConfidenceGauge({required this.value});
-
-  final int value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.end,
-      children: [
-        SizedBox(
-          width: 68,
-          height: 6,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(99),
-            child: LinearProgressIndicator(
-              value: value / 100,
-              backgroundColor: const Color(0xFFE6EEF4),
-              valueColor:
-                  const AlwaysStoppedAnimation<Color>(Color(0xFF1B5E8B)),
-            ),
-          ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          '$value% ثقة التوقع',
-          style: const TextStyle(
-            color: Color(0xFF1B5E8B),
-            fontSize: 12,
-            fontWeight: FontWeight.w900,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _LiveActivityStrip extends StatelessWidget {
-  const _LiveActivityStrip({required this.vehicleCount});
-
-  final int vehicleCount;
-
-  @override
-  Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      reverse: true,
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: [
-          _ActivityPill(
-            label: '$vehicleCount كيات تعمل الآن',
-            icon: Icons.directions_bus_filled_rounded,
-            color: const Color(0xFF1B5E8B),
-          ),
-          const SizedBox(width: 8),
-          const _ActivityPill(
-            label: 'الحركة ممتازة',
-            icon: Icons.trending_up_rounded,
-            color: Color(0xFF17A34A),
-          ),
-          const SizedBox(width: 8),
-          const _ActivityPill(
-            label: 'زخم الخط مرتفع',
-            icon: Icons.bolt_rounded,
-            color: Color(0xFFF5A623),
-          ),
-          const SizedBox(width: 8),
-          const _ActivityPill(
-            label: 'الانتظار مستقر',
-            icon: Icons.check_circle_rounded,
-            color: Color(0xFF7B2CBF),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ActivityPill extends StatelessWidget {
-  const _ActivityPill({
-    required this.label,
-    required this.icon,
-    required this.color,
-  });
-
-  final String label;
-  final IconData icon;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return _GlassSurface(
-      radius: 999,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, color: color, size: 16),
-            const SizedBox(width: 6),
-            Text(
-              label,
-              style: const TextStyle(
-                color: Color(0xFF173244),
-                fontSize: 11.5,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-          ],
         ),
       ),
     );
@@ -617,396 +618,77 @@ class _WaitingOperationsSheet extends StatelessWidget {
   const _WaitingOperationsSheet({
     required this.detail,
     required this.currentPosition,
-    required this.onOpenLiveMap,
     required this.onStopWaiting,
   });
 
   final TransitRouteDetail detail;
   final Position? currentPosition;
-  final VoidCallback onOpenLiveMap;
   final Future<void> Function() onStopWaiting;
 
   @override
   Widget build(BuildContext context) {
-    final pickupDistance = _pickupDistanceMeters();
-    final walkingMinutes = (pickupDistance / 70).clamp(1, 8).ceil();
-
-    return DraggableScrollableSheet(
-      initialChildSize: 0.39,
-      minChildSize: 0.30,
-      maxChildSize: 0.62,
-      snap: true,
-      snapSizes: const [0.39, 0.62],
-      builder: (context, scrollController) {
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(12, 0, 12, 14),
-          child: _GlassSurface(
-            radius: 34,
-            child: ListView(
-              controller: scrollController,
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+    return Positioned(
+      bottom: 24,
+      left: 16,
+      right: 16,
+      child: _GlassSurface(
+        radius: 28,
+        child: Padding(
+          padding: const EdgeInsets.all(18),
+          child: Directionality(
+            textDirection: TextDirection.rtl,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Center(
-                  child: Container(
-                    width: 42,
-                    height: 5,
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade300,
-                      borderRadius: BorderRadius.circular(99),
+                Row(
+                  children: [
+                    Container(
+                      width: 10,
+                      height: 10,
+                      decoration: const BoxDecoration(
+                        color: Color(0xFF16A34A),
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    const Text(
+                      'تتبع حركة الخط نشط وموقعك مرسل للسائقين',
+                      style: TextStyle(
+                        color: Color(0xFF173244),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w900,
+                        fontFamily: 'Tajawal',
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                OutlinedButton(
+                  onPressed: onStopWaiting,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFFB42318),
+                    side: BorderSide(
+                      color: const Color(0xFFB42318).withValues(alpha: 0.18),
+                    ),
+                    backgroundColor: const Color(0xFFFFF1F0).withValues(alpha: 0.72),
+                    minimumSize: const Size.fromHeight(50),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                    textStyle: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w900,
+                      fontFamily: 'Tajawal',
                     ),
                   ),
-                ),
-                const SizedBox(height: 15),
-                const _VisibilityStatusBlock(),
-                const SizedBox(height: 12),
-                _PickupGuidanceBlock(
-                  distanceMeters: pickupDistance,
-                  walkingMinutes: walkingMinutes,
-                ),
-                const SizedBox(height: 13),
-                const _LiveTimelineBlock(),
-                const SizedBox(height: 15),
-                _WaitingActions(
-                  onOpenLiveMap: onOpenLiveMap,
-                  onStopWaiting: onStopWaiting,
+                  child: const Text('إيقاف الانتظار'),
                 ),
               ],
             ),
           ),
-        );
-      },
-    );
-  }
-
-  int _pickupDistanceMeters() {
-    final position = currentPosition;
-    if (position == null || detail.stops.isEmpty) return 50;
-    final stop = detail.stops.first;
-    return Geolocator.distanceBetween(
-      position.latitude,
-      position.longitude,
-      stop.lat,
-      stop.lng,
-    ).round().clamp(35, 850);
-  }
-}
-
-class _VisibilityStatusBlock extends StatelessWidget {
-  const _VisibilityStatusBlock();
-
-  @override
-  Widget build(BuildContext context) {
-    return _MiniPanel(
-      child: Column(
-        children: const [
-          _StatusLine(label: 'موقعك ظاهر للسائقين'),
-          SizedBox(height: 9),
-          _StatusLine(label: 'موقعك محدث الآن'),
-          SizedBox(height: 9),
-          _StatusLine(label: 'يتم تتبع الخط مباشرة'),
-        ],
-      ),
-    );
-  }
-}
-
-class _StatusLine extends StatelessWidget {
-  const _StatusLine({required this.label});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Directionality(
-      textDirection: TextDirection.rtl,
-      child: Row(
-        children: [
-          Container(
-            width: 20,
-            height: 20,
-            decoration: const BoxDecoration(
-              color: Color(0xFFDCFCE7),
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(
-              Icons.check_rounded,
-              color: Color(0xFF16A34A),
-              size: 15,
-            ),
-          ),
-          const SizedBox(width: 8),
-          Text(
-            label,
-            style: const TextStyle(
-              color: Color(0xFF173244),
-              fontSize: 13,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _PickupGuidanceBlock extends StatelessWidget {
-  const _PickupGuidanceBlock({
-    required this.distanceMeters,
-    required this.walkingMinutes,
-  });
-
-  final int distanceMeters;
-  final int walkingMinutes;
-
-  @override
-  Widget build(BuildContext context) {
-    return _MiniPanel(
-      child: Directionality(
-        textDirection: TextDirection.rtl,
-        child: Row(
-          children: [
-            Container(
-              width: 52,
-              height: 52,
-              decoration: BoxDecoration(
-                color: const Color(0xFFF5A623).withValues(alpha: 0.14),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: const Icon(
-                Icons.route_rounded,
-                color: Color(0xFFF5A623),
-                size: 26,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'مكان الصعود',
-                    style: TextStyle(
-                      color: Color(0xFF071827),
-                      fontSize: 15,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                  const SizedBox(height: 5),
-                  Text(
-                    '$distanceMeters متر · $walkingMinutes دقيقة مشياً',
-                    style: TextStyle(
-                      color: Colors.grey.shade600,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            SizedBox(
-              width: 78,
-              height: 36,
-              child: CustomPaint(painter: _PickupPreviewPainter()),
-            ),
-          ],
         ),
       ),
-    );
-  }
-}
-
-class _PickupPreviewPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final routePaint = Paint()
-      ..color = const Color(0xFF1B5E8B)
-      ..strokeWidth = 4
-      ..strokeCap = StrokeCap.round
-      ..style = PaintingStyle.stroke;
-    final walkPaint = Paint()
-      ..color = const Color(0xFFF5A623)
-      ..strokeWidth = 3
-      ..strokeCap = StrokeCap.round
-      ..style = PaintingStyle.stroke;
-    final path = Path()
-      ..moveTo(size.width * 0.08, size.height * 0.68)
-      ..cubicTo(
-        size.width * 0.28,
-        size.height * 0.18,
-        size.width * 0.55,
-        size.height * 0.84,
-        size.width * 0.92,
-        size.height * 0.30,
-      );
-    canvas.drawPath(path, routePaint);
-    canvas.drawLine(
-      Offset(size.width * 0.15, size.height * 0.18),
-      Offset(size.width * 0.37, size.height * 0.48),
-      walkPaint,
-    );
-    canvas.drawCircle(
-      Offset(size.width * 0.15, size.height * 0.18),
-      5,
-      Paint()..color = const Color(0xFF17A34A),
-    );
-    canvas.drawCircle(
-      Offset(size.width * 0.37, size.height * 0.48),
-      5,
-      Paint()..color = const Color(0xFFF5A623),
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}
-
-class _LiveTimelineBlock extends StatelessWidget {
-  const _LiveTimelineBlock();
-
-  @override
-  Widget build(BuildContext context) {
-    return _MiniPanel(
-      child: Column(
-        children: const [
-          _TimelineStep(label: 'مشاركة الموقع', state: _TimelineState.done),
-          _TimelineStep(label: 'ظهورك للسائقين', state: _TimelineState.done),
-          _TimelineStep(
-              label: 'البحث عن أقرب كية', state: _TimelineState.active),
-          _TimelineStep(label: 'اقتراب الكية', state: _TimelineState.pending),
-          _TimelineStep(label: 'الصعود', state: _TimelineState.pending),
-        ],
-      ),
-    );
-  }
-}
-
-enum _TimelineState { done, active, pending }
-
-class _TimelineStep extends StatelessWidget {
-  const _TimelineStep({required this.label, required this.state});
-
-  final String label;
-  final _TimelineState state;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = switch (state) {
-      _TimelineState.done => const Color(0xFF16A34A),
-      _TimelineState.active => const Color(0xFF1B5E8B),
-      _TimelineState.pending => const Color(0xFFC6CDD5),
-    };
-    final icon = switch (state) {
-      _TimelineState.done => Icons.check_rounded,
-      _TimelineState.active => Icons.circle,
-      _TimelineState.pending => Icons.circle_outlined,
-    };
-
-    return Directionality(
-      textDirection: TextDirection.rtl,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 5),
-        child: Row(
-          children: [
-            Icon(icon,
-                color: color, size: state == _TimelineState.active ? 12 : 18),
-            const SizedBox(width: 10),
-            Text(
-              label,
-              style: TextStyle(
-                color: state == _TimelineState.pending
-                    ? Colors.grey.shade500
-                    : const Color(0xFF173244),
-                fontSize: 13,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _WaitingActions extends StatelessWidget {
-  const _WaitingActions({
-    required this.onOpenLiveMap,
-    required this.onStopWaiting,
-  });
-
-  final VoidCallback onOpenLiveMap;
-  final Future<void> Function() onStopWaiting;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: FilledButton.icon(
-            onPressed: onOpenLiveMap,
-            icon: const Icon(Icons.map_rounded, size: 20),
-            label: const Text('الخريطة الحية'),
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFF1B5E8B),
-              foregroundColor: Colors.white,
-              minimumSize: const Size.fromHeight(54),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(22),
-              ),
-              textStyle: const TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: OutlinedButton(
-            onPressed: onStopWaiting,
-            style: OutlinedButton.styleFrom(
-              foregroundColor: const Color(0xFFB42318),
-              side: BorderSide(
-                color: const Color(0xFFB42318).withValues(alpha: 0.18),
-              ),
-              backgroundColor: const Color(0xFFFFF1F0).withValues(alpha: 0.72),
-              minimumSize: const Size.fromHeight(54),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(22),
-              ),
-              textStyle: const TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-            child: const Text('إيقاف الانتظار'),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _MiniPanel extends StatelessWidget {
-  const _MiniPanel({required this.child});
-
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.68),
-        borderRadius: BorderRadius.circular(26),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 20,
-            offset: const Offset(0, 10),
-          ),
-        ],
-      ),
-      child: child,
     );
   }
 }
@@ -1030,6 +712,10 @@ class _PassengerHomeMap extends StatefulWidget {
 
 class _PassengerHomeMapState extends State<_PassengerHomeMap> {
   final Map<String, List<LatLng>> _roadPaths = {};
+  List<LatLng> _walkingPath = [];
+  GoogleMapController? _mapController;
+  bool _navigationModeActive = true;
+  bool _mapInitialized = false;
 
   static const _mapStyle = '''
 [
@@ -1050,6 +736,7 @@ class _PassengerHomeMapState extends State<_PassengerHomeMap> {
   void initState() {
     super.initState();
     _loadRoadPaths();
+    _loadWalkingPath();
   }
 
   @override
@@ -1058,6 +745,115 @@ class _PassengerHomeMapState extends State<_PassengerHomeMap> {
     final oldIds = oldWidget.details.map((detail) => detail.route.id).join(',');
     final nextIds = widget.details.map((detail) => detail.route.id).join(',');
     if (oldIds != nextIds) _loadRoadPaths();
+
+    final oldUser = oldWidget.currentPosition;
+    final nextUser = widget.currentPosition;
+    final userMoved = oldUser?.latitude != nextUser?.latitude || oldUser?.longitude != nextUser?.longitude;
+
+    if (widget.isWaitingMode != oldWidget.isWaitingMode || userMoved || oldIds != nextIds) {
+      _loadWalkingPath();
+    }
+  }
+
+  Future<void> _loadWalkingPath() async {
+    if (!widget.isWaitingMode ||
+        widget.currentPosition == null ||
+        widget.details.isEmpty ||
+        widget.details.first.stops.isEmpty) {
+      if (_walkingPath.isNotEmpty) {
+        setState(() {
+          _walkingPath = [];
+        });
+      }
+      return;
+    }
+
+    final userLat = widget.currentPosition!.latitude;
+    final userLng = widget.currentPosition!.longitude;
+    final stop = widget.details.first.stops.first;
+
+    final distance = Geolocator.distanceBetween(userLat, userLng, stop.lat, stop.lng);
+    if (distance <= 30) {
+      if (_walkingPath.isNotEmpty) {
+        setState(() {
+          _walkingPath = [];
+        });
+      }
+      return;
+    }
+
+    try {
+      final uri = Uri.https(
+        'router.project-osrm.org',
+        '/route/v1/foot/$userLng,$userLat;${stop.lng},${stop.lat}',
+        {'overview': 'full', 'geometries': 'geojson'},
+      );
+      final response = await http.get(uri).timeout(const Duration(seconds: 5));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        final routes = data['routes'] as List<dynamic>? ?? const [];
+        final geometry = routes.firstOrNull?['geometry'] as Map<String, dynamic>?;
+        final coordinates = geometry?['coordinates'] as List<dynamic>? ?? const [];
+        final points = coordinates
+            .whereType<List<dynamic>>()
+            .where((point) => point.length >= 2)
+            .map((point) => LatLng(
+                  (point[1] as num).toDouble(),
+                  (point[0] as num).toDouble(),
+                ))
+            .toList();
+
+        if (mounted) {
+          setState(() {
+            _walkingPath = points;
+          });
+          _animateCameraToNavigation();
+        }
+      } else {
+        if (mounted) {
+          setState(() {
+            _walkingPath = [LatLng(userLat, userLng), LatLng(stop.lat, stop.lng)];
+          });
+          _animateCameraToNavigation();
+        }
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _walkingPath = [LatLng(userLat, userLng), LatLng(stop.lat, stop.lng)];
+        });
+        _animateCameraToNavigation();
+      }
+    }
+  }
+
+  void _animateCameraToNavigation() {
+    if (_mapController == null ||
+        widget.currentPosition == null ||
+        widget.details.isEmpty ||
+        widget.details.first.stops.isEmpty) {
+      return;
+    }
+    if (!_navigationModeActive) {
+      return;
+    }
+
+    final userLat = widget.currentPosition!.latitude;
+    final userLng = widget.currentPosition!.longitude;
+    final stop = widget.details.first.stops.first;
+
+    double bearing = Geolocator.bearingBetween(userLat, userLng, stop.lat, stop.lng);
+
+    _mapController!.animateCamera(
+      CameraUpdate.newCameraPosition(
+        CameraPosition(
+          target: LatLng(userLat, userLng),
+          zoom: 17.5,
+          bearing: bearing,
+          tilt: 45.0,
+        ),
+      ),
+    );
   }
 
   @override
@@ -1080,70 +876,136 @@ class _PassengerHomeMapState extends State<_PassengerHomeMap> {
             const Color(0xFF16A34A),
           ];
 
-    return GoogleMap(
-      initialCameraPosition: CameraPosition(
-          target: center, zoom: widget.isWaitingMode ? 13.2 : 12.3),
-      style: _mapStyle,
-      mapType: MapType.normal,
-      myLocationEnabled: false,
-      myLocationButtonEnabled: false,
-      zoomControlsEnabled: false,
-      compassEnabled: false,
-      mapToolbarEnabled: false,
-      polylines: {
-        for (var index = 0; index < widget.details.length; index += 1)
-          if (widget.details[index].stops.length > 1)
-            Polyline(
-              polylineId: PolylineId('home_route_$index'),
-              points: _roadPaths[widget.details[index].route.id] ??
-                  widget.details[index].stops
-                      .map((stop) => LatLng(stop.lat, stop.lng))
-                      .toList(),
-              color: colors[index % colors.length],
-              width: widget.isWaitingMode ? 8 : 6,
-              zIndex: 2 + index,
-            ),
-      },
-      markers: {
-        for (var index = 0; index < widget.details.length; index += 1)
-          if (widget.details[index].stops.isNotEmpty)
-            Marker(
-              markerId: MarkerId('home_bus_$index'),
-              position: _markerPoint(widget.details[index], index),
-              icon: BitmapDescriptor.defaultMarkerWithHue(
-                _markerHue(index),
-              ),
-              infoWindow: InfoWindow(title: widget.details[index].route.nameAr),
-            ),
-        if (widget.currentPosition != null)
-          Marker(
-            markerId: const MarkerId('home_user_location'),
-            position: LatLng(
-              widget.currentPosition!.latitude,
-              widget.currentPosition!.longitude,
-            ),
-            icon: BitmapDescriptor.defaultMarkerWithHue(
-                BitmapDescriptor.hueGreen),
-            infoWindow: const InfoWindow(title: 'موقعك'),
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: GoogleMap(
+            initialCameraPosition: CameraPosition(
+                target: center, zoom: widget.isWaitingMode ? 13.2 : 12.3),
+            style: _mapStyle,
+            mapType: MapType.normal,
+            myLocationEnabled: false,
+            myLocationButtonEnabled: false,
+            zoomControlsEnabled: false,
+            compassEnabled: false,
+            mapToolbarEnabled: false,
+            onMapCreated: (controller) {
+              _mapController = controller;
+              if (widget.isWaitingMode && _walkingPath.isNotEmpty) {
+                _animateCameraToNavigation();
+              }
+              Future.delayed(const Duration(milliseconds: 1500), () {
+                if (mounted) {
+                  _mapInitialized = true;
+                }
+              });
+            },
+            onCameraMoveStarted: () {
+              if (!_mapInitialized) return;
+              if (widget.isWaitingMode && _walkingPath.isNotEmpty && _navigationModeActive) {
+                setState(() {
+                  _navigationModeActive = false;
+                });
+              }
+            },
+            polylines: {
+              for (var index = 0; index < widget.details.length; index += 1)
+                if (widget.details[index].stops.length > 1)
+                  Polyline(
+                    polylineId: PolylineId('home_route_$index'),
+                    points: _roadPaths[widget.details[index].route.id] ??
+                        widget.details[index].stops
+                            .map((stop) => LatLng(stop.lat, stop.lng))
+                            .toList(),
+                    color: colors[index % colors.length],
+                    width: widget.isWaitingMode ? 8 : 6,
+                    zIndex: 2 + index,
+                  ),
+              if (widget.isWaitingMode && _walkingPath.isNotEmpty)
+                Polyline(
+                  polylineId: const PolylineId('home_walking_route'),
+                  points: _walkingPath,
+                  color: const Color(0xFF16A34A),
+                  width: 5,
+                  patterns: [
+                    PatternItem.dash(12),
+                    PatternItem.gap(8),
+                  ],
+                  zIndex: 99,
+                ),
+            },
+            markers: {
+              for (var index = 0; index < widget.details.length; index += 1)
+                if (widget.details[index].stops.isNotEmpty)
+                  Marker(
+                    markerId: MarkerId('home_bus_$index'),
+                    position: _markerPoint(widget.details[index], index),
+                    icon: BitmapDescriptor.defaultMarkerWithHue(
+                      _markerHue(index),
+                    ),
+                    infoWindow: InfoWindow(title: widget.details[index].route.nameAr),
+                  ),
+              if (widget.currentPosition != null)
+                Marker(
+                  markerId: const MarkerId('home_user_location'),
+                  position: LatLng(
+                    widget.currentPosition!.latitude,
+                    widget.currentPosition!.longitude,
+                  ),
+                  icon: BitmapDescriptor.defaultMarkerWithHue(
+                      BitmapDescriptor.hueGreen),
+                  infoWindow: const InfoWindow(title: 'موقعك'),
+                ),
+              if (widget.isWaitingMode &&
+                  widget.details.isNotEmpty &&
+                  widget.details.first.stops.isNotEmpty)
+                Marker(
+                  markerId: const MarkerId('home_pickup_stop'),
+                  position: LatLng(
+                    widget.details.first.stops.first.lat,
+                    widget.details.first.stops.first.lng,
+                  ),
+                  icon: BitmapDescriptor.defaultMarkerWithHue(
+                      BitmapDescriptor.hueBlue),
+                  infoWindow: InfoWindow(
+                    title: 'موقف الصعود: ${widget.details.first.stops.first.nameAr}',
+                    snippet: widget.details.first.stops.first.landmarkAr,
+                  ),
+                ),
+              for (var index = 0; index < widget.vehicles.length; index += 1)
+                if (widget.vehicles[index].lat != 0 &&
+                    widget.vehicles[index].lng != 0)
+                  Marker(
+                    markerId: MarkerId('home_vehicle_$index'),
+                    position: LatLng(
+                        widget.vehicles[index].lat, widget.vehicles[index].lng),
+                    icon: BitmapDescriptor.defaultMarkerWithHue(
+                      index == 0
+                          ? BitmapDescriptor.hueOrange
+                          : BitmapDescriptor.hueAzure,
+                    ),
+                    infoWindow: InfoWindow(
+                      title: widget.vehicles[index].vehicleLabel,
+                      snippet: '${widget.vehicles[index].etaMinutes} دقائق',
+                    ),
+                  ),
+            },
           ),
-        for (var index = 0; index < widget.vehicles.length; index += 1)
-          if (widget.vehicles[index].lat != 0 &&
-              widget.vehicles[index].lng != 0)
-            Marker(
-              markerId: MarkerId('home_vehicle_$index'),
-              position: LatLng(
-                  widget.vehicles[index].lat, widget.vehicles[index].lng),
-              icon: BitmapDescriptor.defaultMarkerWithHue(
-                index == 0
-                    ? BitmapDescriptor.hueOrange
-                    : BitmapDescriptor.hueAzure,
-              ),
-              infoWindow: InfoWindow(
-                title: widget.vehicles[index].vehicleLabel,
-                snippet: '${widget.vehicles[index].etaMinutes} دقائق',
-              ),
+        ),
+        if (widget.isWaitingMode && _walkingPath.isNotEmpty && !_navigationModeActive)
+          PositionedDirectional(
+            start: 18,
+            bottom: 176,
+            child: _ReCenterButton(
+              onTap: () {
+                setState(() {
+                  _navigationModeActive = true;
+                });
+                _animateCameraToNavigation();
+              },
             ),
-      },
+          ),
+      ],
     );
   }
 
@@ -1207,6 +1069,45 @@ class _PassengerHomeMapState extends State<_PassengerHomeMap> {
       2 => BitmapDescriptor.hueOrange,
       _ => BitmapDescriptor.hueGreen,
     };
+  }
+}
+
+class _ReCenterButton extends StatelessWidget {
+  const _ReCenterButton({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: const Color(0xFF16A34A),
+      borderRadius: BorderRadius.circular(999),
+      elevation: 8,
+      shadowColor: Colors.black.withValues(alpha: 0.25),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: const [
+              Icon(Icons.navigation_rounded, size: 20, color: Colors.white),
+              SizedBox(width: 8),
+              Text(
+                'بدء الملاحة',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w900,
+                  fontFamily: 'Tajawal',
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -1488,8 +1389,14 @@ class _NearbyRoutesSheet extends StatelessWidget {
 
   int _etaFor(int index, TransitRouteDetail detail) {
     final distance = _distanceToRoute(detail);
-    if (distance != null) return (distance / 550).clamp(3, 12).round();
-    return [3, 5, 7, 10][index.clamp(0, 3)];
+    final idHash = detail.route.id.hashCode.abs();
+    final routeOffset = idHash % 8; // 0 to 7 minutes wait variation per route
+    if (distance != null) {
+      // Base walking time (approx 80m/min) + estimated waiting time (3m + route variation)
+      final walkingMinutes = (distance / 80).round();
+      return (walkingMinutes + 3 + routeOffset).clamp(3, 22);
+    }
+    return [3, 6, 8, 12][index.clamp(0, 3)] + (routeOffset % 3);
   }
 
   String _fareText(TransitRoute route) {
