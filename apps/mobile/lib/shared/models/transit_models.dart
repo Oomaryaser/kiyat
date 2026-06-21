@@ -105,6 +105,10 @@ class VehicleArrivalEstimate {
     required this.hasPassedPickup,
     required this.lat,
     required this.lng,
+    this.etaConfidence = 'high',
+    this.etaConfidenceLabel = 'التتبع نشط',
+    this.lastSeenSeconds,
+    this.notificationHint,
     this.lastSeenAt,
   });
 
@@ -115,6 +119,10 @@ class VehicleArrivalEstimate {
   final bool hasPassedPickup;
   final double lat;
   final double lng;
+  final String etaConfidence;
+  final String etaConfidenceLabel;
+  final int? lastSeenSeconds;
+  final String? notificationHint;
   final DateTime? lastSeenAt;
 
   factory VehicleArrivalEstimate.fromJson(Map<String, dynamic> json) {
@@ -129,6 +137,11 @@ class VehicleArrivalEstimate {
       hasPassedPickup: json['hasPassedPickup'] as bool? ?? false,
       lat: (json['lat'] as num?)?.toDouble() ?? 0,
       lng: (json['lng'] as num?)?.toDouble() ?? 0,
+      etaConfidence: json['etaConfidence'] as String? ?? 'high',
+      etaConfidenceLabel:
+          json['etaConfidenceLabel'] as String? ?? 'التتبع نشط',
+      lastSeenSeconds: (json['lastSeenSeconds'] as num?)?.toInt(),
+      notificationHint: json['notificationHint'] as String?,
       lastSeenAt: DateTime.tryParse(json['lastSeenAt'] as String? ?? ''),
     );
   }

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
@@ -11,6 +12,8 @@ import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+
+import 'core/utils/location_helper.dart';
 
 import 'core/theme/app_theme.dart';
 import 'driver_repository.dart';
@@ -1027,19 +1030,30 @@ class TrackingScreen extends StatefulWidget {
 }
 
 class _TrackingScreenState extends State<TrackingScreen> {
+  static const double _routeSnapThresholdMeters = 35;
+
   StreamSubscription<Position>? positionSubscription;
   Timer? waitsTimer;
   late Future<DriverRouteDetail> routeDetailFuture;
+  List<DriverStop> routeStops = const [];
   List<PassengerWaitPoint> waits = const [];
   Position? lastPosition;
   bool tracking = false;
+  bool serverTrackingActive = false;
   bool stopping = false;
   String? statusMessage;
 
   @override
   void initState() {
     super.initState();
-    routeDetailFuture = widget.repository.routeDetail(widget.route.id);
+    routeDetailFuture = widget.repository.routeDetail(widget.route.id).then((
+      detail,
+    ) {
+      if (mounted) {
+        setState(() => routeStops = detail.stops);
+      }
+      return detail;
+    });
     _startLiveTracking();
   }
 
@@ -1053,6 +1067,7 @@ class _TrackingScreenState extends State<TrackingScreen> {
   @override
   Widget build(BuildContext context) {
     final nearestWait = _nearestWait;
+    final routeGuidance = _routeGuidance;
     return PopScope(
       canPop: !tracking,
       onPopInvokedWithResult: (didPop, _) {
@@ -1074,6 +1089,7 @@ class _TrackingScreenState extends State<TrackingScreen> {
                     waits: waits,
                     lastPosition: lastPosition,
                     routeName: widget.route.nameAr,
+                    routeSnapThresholdMeters: _routeSnapThresholdMeters,
                   );
                 },
               ),
@@ -1082,6 +1098,8 @@ class _TrackingScreenState extends State<TrackingScreen> {
               routeName: widget.route.nameAr,
               plateNumber: widget.vehicle.plateNumber,
               tracking: tracking,
+              serverTrackingActive: serverTrackingActive,
+              routeGuidance: routeGuidance,
               stopping: stopping,
               statusMessage: statusMessage,
               waits: waits,
@@ -1117,6 +1135,16 @@ class _TrackingScreenState extends State<TrackingScreen> {
     );
   }
 
+  DriverRouteGuidance? get _routeGuidance {
+    final position = lastPosition;
+    if (position == null || routeStops.length < 2) return null;
+    return DriverRouteGuidance.fromStops(
+      stops: routeStops,
+      position: LatLng(position.latitude, position.longitude),
+      thresholdMeters: _routeSnapThresholdMeters,
+    );
+  }
+
   Future<void> _startLiveTracking() async {
     setState(() {
       tracking = true;
@@ -1145,7 +1173,8 @@ class _TrackingScreenState extends State<TrackingScreen> {
         return;
       }
 
-      final firstPosition = await Geolocator.getCurrentPosition(
+      await routeDetailFuture;
+      final firstPosition = await KiyatLocation.getCurrentPosition(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.best,
           timeLimit: Duration(seconds: 8),
@@ -1157,13 +1186,18 @@ class _TrackingScreenState extends State<TrackingScreen> {
         (_) => _loadPassengerWaits(),
       );
       await _loadPassengerWaits();
-      positionSubscription = Geolocator.getPositionStream(
+      positionSubscription = KiyatLocation.getPositionStream(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.best,
           distanceFilter: 18,
         ),
       ).listen(_sendPosition);
-      setState(() => statusMessage = 'التتبع شغال والركاب يشوفون كيتك.');
+      final routeGuidance = _routeGuidance;
+      setState(
+        () => statusMessage = routeGuidance?.isOffRoute == true
+            ? 'روح لأقرب نقطة على الخط علمود يبدأ التتبع مالتك.'
+            : 'التتبع شغال والركاب يشوفون كيتك.',
+      );
     } on DriverRepositoryException catch (exception) {
       setState(() {
         tracking = false;
@@ -1178,6 +1212,30 @@ class _TrackingScreenState extends State<TrackingScreen> {
   }
 
   Future<void> _sendPosition(Position position) async {
+    final routeGuidance = routeStops.length < 2
+        ? null
+        : DriverRouteGuidance.fromStops(
+            stops: routeStops,
+            position: LatLng(position.latitude, position.longitude),
+            thresholdMeters: _routeSnapThresholdMeters,
+          );
+    if (routeGuidance?.isOffRoute == true) {
+      if (serverTrackingActive) {
+        try {
+          await widget.repository.stopVehicleTracking(widget.vehicle.id);
+        } catch (_) {}
+      }
+      if (!mounted) return;
+      setState(() {
+        lastPosition = position;
+        tracking = true;
+        serverTrackingActive = false;
+        statusMessage =
+            'روح لأقرب نقطة على الخط علمود يبدأ التتبع مالتك.';
+      });
+      return;
+    }
+
     try {
       await widget.repository.updateVehicleLocation(
         vehicleId: widget.vehicle.id,
@@ -1191,6 +1249,7 @@ class _TrackingScreenState extends State<TrackingScreen> {
       setState(() {
         lastPosition = position;
         tracking = true;
+        serverTrackingActive = true;
         statusMessage = 'التتبع شغال والركاب يشوفون كيتك.';
       });
     } on DriverRepositoryException catch (exception) {
@@ -1243,7 +1302,10 @@ class _TrackingScreenState extends State<TrackingScreen> {
     try {
       await widget.repository.stopVehicleTracking(widget.vehicle.id);
       if (!mounted) return;
-      setState(() => tracking = false);
+      setState(() {
+        tracking = false;
+        serverTrackingActive = false;
+      });
       Navigator.pop(context);
     } on DriverRepositoryException catch (exception) {
       if (!mounted) return;
@@ -1260,6 +1322,8 @@ class _DriverNavigationSheet extends StatelessWidget {
     required this.routeName,
     required this.plateNumber,
     required this.tracking,
+    required this.serverTrackingActive,
+    required this.routeGuidance,
     required this.stopping,
     required this.statusMessage,
     required this.waits,
@@ -1271,6 +1335,8 @@ class _DriverNavigationSheet extends StatelessWidget {
   final String routeName;
   final String plateNumber;
   final bool tracking;
+  final bool serverTrackingActive;
+  final DriverRouteGuidance? routeGuidance;
   final bool stopping;
   final String? statusMessage;
   final List<PassengerWaitPoint> waits;
@@ -1282,7 +1348,13 @@ class _DriverNavigationSheet extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     final distance = nearestWait == null ? null : _distanceToWait(nearestWait!);
-    final hasPassenger = nearestWait != null;
+    final isOffRoute = routeGuidance?.isOffRoute == true;
+    final hasPassenger = nearestWait != null && !isOffRoute;
+    final leadingColor = isOffRoute
+        ? Colors.orange.shade900
+        : hasPassenger
+            ? Colors.orange.shade900
+            : colors.primary;
     return SafeArea(
       top: false,
       child: Container(
@@ -1321,14 +1393,18 @@ class _DriverNavigationSheet extends StatelessWidget {
                   decoration: BoxDecoration(
                     color: hasPassenger
                         ? Colors.orange.shade100
-                        : colors.primary.withValues(alpha: 0.1),
+                        : isOffRoute
+                            ? Colors.orange.shade100
+                            : colors.primary.withValues(alpha: 0.1),
                     shape: BoxShape.circle,
                   ),
                   child: Icon(
-                    hasPassenger ? Icons.navigation : Icons.sensors,
-                    color: hasPassenger
-                        ? Colors.orange.shade900
-                        : colors.primary,
+                    isOffRoute
+                        ? Icons.navigation
+                        : hasPassenger
+                            ? Icons.navigation
+                            : Icons.sensors,
+                    color: leadingColor,
                     size: 30,
                   ),
                 ),
@@ -1338,14 +1414,20 @@ class _DriverNavigationSheet extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        hasPassenger ? 'روح لأقرب راكب' : 'استمر على خطك',
+                        isOffRoute
+                            ? 'روح لهنا'
+                            : hasPassenger
+                                ? 'روح لأقرب راكب'
+                                : 'استمر على خطك',
                         style: Theme.of(context).textTheme.titleLarge?.copyWith(
                           fontWeight: FontWeight.w900,
                         ),
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        hasPassenger
+                        isOffRoute
+                            ? 'يبعد ${_formatDistance(routeGuidance!.distanceMeters)} عن الخط، حتى يبدأ التتبع مالتك.'
+                            : hasPassenger
                             ? distance == null
                                   ? 'الراكب ظاهر على الخريطة'
                                   : 'يبعد ${_formatDistance(distance)} عنك'
@@ -1359,7 +1441,7 @@ class _DriverNavigationSheet extends StatelessWidget {
                   '${waits.length}',
                   style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                     fontWeight: FontWeight.w900,
-                    color: hasPassenger
+                    color: isOffRoute || hasPassenger
                         ? Colors.orange.shade900
                         : colors.primary,
                   ),
@@ -1372,9 +1454,19 @@ class _DriverNavigationSheet extends StatelessWidget {
               runSpacing: 8,
               children: [
                 _NavigationChip(
-                  icon: tracking ? Icons.sensors : Icons.sensors_off_outlined,
-                  label: tracking ? 'التتبع شغال' : 'التتبع متوقف',
-                  color: tracking ? colors.primary : colors.error,
+                  icon: serverTrackingActive
+                      ? Icons.sensors
+                      : Icons.sensors_off_outlined,
+                  label: serverTrackingActive
+                      ? 'التتبع شغال'
+                      : tracking
+                          ? 'بانتظار الخط'
+                          : 'التتبع متوقف',
+                  color: serverTrackingActive
+                      ? colors.primary
+                      : tracking
+                          ? Colors.orange.shade800
+                          : colors.error,
                 ),
                 _NavigationChip(
                   icon: Icons.route_outlined,
@@ -1451,6 +1543,72 @@ class _NavigationChip extends StatelessWidget {
             style: TextStyle(color: color, fontWeight: FontWeight.w800),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _DriverMapBanner extends StatelessWidget {
+  const _DriverMapBanner({
+    required this.icon,
+    required this.title,
+    required this.message,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String title;
+  final String message;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.white,
+      elevation: 4,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          child: Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: Colors.orange.shade100,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(icon, color: Colors.orange.shade900),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      title,
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleMedium
+                          ?.copyWith(fontWeight: FontWeight.w900),
+                    ),
+                    Text(
+                      message,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: Colors.grey.shade700),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(Icons.center_focus_strong),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1627,35 +1785,185 @@ class _DriverTrackingMap extends StatefulWidget {
     required this.waits,
     required this.lastPosition,
     required this.routeName,
+    required this.routeSnapThresholdMeters,
   });
 
   final List<DriverStop> stops;
   final List<PassengerWaitPoint> waits;
   final Position? lastPosition;
   final String routeName;
+  final double routeSnapThresholdMeters;
 
   @override
   State<_DriverTrackingMap> createState() => _DriverTrackingMapState();
 }
 
 class _DriverTrackingMapState extends State<_DriverTrackingMap> {
+  static const _cleanMapStyle = '''
+[
+  {
+    "featureType": "poi",
+    "elementType": "labels.icon",
+    "stylers": [{ "visibility": "off" }]
+  },
+  {
+    "featureType": "poi.business",
+    "stylers": [{ "visibility": "off" }]
+  },
+  {
+    "featureType": "transit.station",
+    "elementType": "labels.icon",
+    "stylers": [{ "visibility": "off" }]
+  }
+]
+''';
+
   GoogleMapController? controller;
   String? focusedWaitId;
   String? routeRequestKey;
   List<LatLng> roadToWait = const [];
   bool roadRouteLoaded = false;
   List<LatLng> roadRoute = const [];
+  final Map<String, BitmapDescriptor> _passengerIcons = {};
+  BitmapDescriptor? _majorStopIcon;
+  BitmapDescriptor? _minorStopIcon;
 
   @override
   void initState() {
     super.initState();
     _loadTransitRoadRoute();
+    _updatePassengerIcons();
+  }
+
+  Future<BitmapDescriptor> _buildStopDotIcon(Color color, double size) async {
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    final center = Offset(size / 2, size / 2);
+
+    canvas.drawCircle(
+      center,
+      size * 0.42,
+      Paint()..color = Colors.white,
+    );
+    canvas.drawCircle(
+      center,
+      size * 0.31,
+      Paint()..color = color,
+    );
+    canvas.drawCircle(
+      center,
+      size * 0.16,
+      Paint()..color = Colors.white.withOpacity(0.9),
+    );
+
+    final picture = recorder.endRecording();
+    final image = await picture.toImage(size.toInt(), size.toInt());
+    final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+    final bytes = byteData!.buffer.asUint8List();
+
+    return BitmapDescriptor.bytes(bytes, width: size / 2, height: size / 2);
+  }
+
+  Future<void> _updatePassengerIcons() async {
+    bool changed = false;
+    if (_majorStopIcon == null) {
+      _majorStopIcon = await _buildStopDotIcon(const Color(0xFF1B5E8B), 28);
+      changed = true;
+    }
+    if (_minorStopIcon == null) {
+      _minorStopIcon = await _buildStopDotIcon(const Color(0xFF7BA9C6), 22);
+      changed = true;
+    }
+
+    final nearestWait = _nearestWait;
+    for (int i = 0; i < widget.waits.length; i++) {
+      final wait = widget.waits[i];
+      final isNearest = wait.id == nearestWait?.id;
+      final number = i + 1;
+      final cacheKey = '${wait.id}_${number}_$isNearest';
+      if (!_passengerIcons.containsKey(cacheKey)) {
+        try {
+          final icon = await _buildPassengerDotIcon(number, isNearest);
+          _passengerIcons[cacheKey] = icon;
+          changed = true;
+        } catch (_) {}
+      }
+    }
+    if (changed && mounted) {
+      setState(() {});
+    }
+  }
+
+  Future<BitmapDescriptor> _buildPassengerDotIcon(int number, bool isNearest) async {
+    const size = 64.0;
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    final center = Offset(size / 2, size / 2);
+
+    // 1. Shadow/Outer glow
+    final shadowColor = isNearest
+        ? const Color(0xFFFF5722).withOpacity(0.38)
+        : Colors.black.withOpacity(0.18);
+    canvas.drawCircle(
+      center,
+      28,
+      Paint()
+        ..color = shadowColor
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3),
+    );
+
+    // 2. White outer border
+    canvas.drawCircle(
+      center,
+      21,
+      Paint()..color = Colors.white,
+    );
+
+    // 3. Main colored circle
+    final mainColor = isNearest ? const Color(0xFFFF5722) : const Color(0xFF1B5E8B);
+    canvas.drawCircle(
+      center,
+      17,
+      Paint()..color = mainColor,
+    );
+
+    // 4. Number text centered
+    final textSpan = TextSpan(
+      style: const TextStyle(
+        color: Colors.white,
+        fontSize: 18,
+        fontWeight: FontWeight.w900,
+        fontFamily: 'Tajawal',
+      ),
+      text: '$number',
+    );
+    final textPainter = TextPainter(
+      text: textSpan,
+      textDirection: TextDirection.ltr,
+    );
+    textPainter.layout();
+    
+    final textOffset = Offset(
+      center.dx - textPainter.width / 2,
+      center.dy - textPainter.height / 2,
+    );
+    textPainter.paint(canvas, textOffset);
+
+    final picture = recorder.endRecording();
+    final image = await picture.toImage(size.toInt(), size.toInt());
+    final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+    final bytes = byteData!.buffer.asUint8List();
+
+    return BitmapDescriptor.bytes(bytes, width: size / 2, height: size / 2);
   }
 
   @override
   void didUpdateWidget(covariant _DriverTrackingMap oldWidget) {
     super.didUpdateWidget(oldWidget);
-    final nearestWait = _nearestWait;
+    _updatePassengerIcons();
+    final routeGuidance = _routeGuidance;
+    final isOffRoute = routeGuidance?.isOffRoute == true;
+    final nearestWait = isOffRoute ? null : _nearestWait;
     final positionChanged =
         oldWidget.lastPosition?.latitude != widget.lastPosition?.latitude ||
         oldWidget.lastPosition?.longitude != widget.lastPosition?.longitude;
@@ -1666,6 +1974,14 @@ class _DriverTrackingMapState extends State<_DriverTrackingMap> {
     if (oldWidget.stops.map((s) => '${s.lat},${s.lng}').join(',') !=
         widget.stops.map((s) => '${s.lat},${s.lng}').join(',')) {
       _loadTransitRoadRoute();
+    }
+
+    if (isOffRoute && routeGuidance != null && positionChanged) {
+      routeRequestKey = null;
+      roadToWait = const [];
+      roadRouteLoaded = false;
+      _focusOnRoutePoint(routeGuidance);
+      return;
     }
 
     if (nearestWait != null &&
@@ -1698,9 +2014,13 @@ class _DriverTrackingMapState extends State<_DriverTrackingMap> {
     }
 
     final colors = Theme.of(context).colorScheme;
-    final nearestWait = _nearestWait;
+    final routeGuidance = _routeGuidance;
+    final isOffRoute = routeGuidance?.isOffRoute == true;
+    final nearestWait = isOffRoute ? null : _nearestWait;
     final distance = nearestWait == null ? null : _distanceToWait(nearestWait);
-    final roadPoints = _guidancePoints(nearestWait);
+    final roadPoints = isOffRoute
+        ? _routeGuidancePoints(routeGuidance)
+        : _guidancePoints(nearestWait);
     return ClipRRect(
       borderRadius: BorderRadius.circular(14),
       child: Stack(
@@ -1713,6 +2033,7 @@ class _DriverTrackingMapState extends State<_DriverTrackingMap> {
               });
             },
             initialCameraPosition: CameraPosition(target: center, zoom: 14.8),
+            style: _cleanMapStyle,
             mapType: MapType.normal,
             myLocationButtonEnabled: false,
             myLocationEnabled: false,
@@ -1751,20 +2072,33 @@ class _DriverTrackingMapState extends State<_DriverTrackingMap> {
                 ),
               ],
               if (widget.lastPosition != null &&
-                  nearestWait != null &&
+                  (nearestWait != null || isOffRoute) &&
                   roadPoints.length > 1)
                 Polyline(
-                  polylineId: const PolylineId('driver_to_nearest_wait'),
+                  polylineId: PolylineId(
+                    isOffRoute
+                        ? 'driver_to_route_start'
+                        : 'driver_to_nearest_wait',
+                  ),
                   points: roadPoints,
                   color: Colors.orange.shade800,
                   width: 7,
                   zIndex: 6,
-                  patterns: roadRouteLoaded
+                  patterns: !isOffRoute && roadRouteLoaded
                       ? const []
                       : [PatternItem.dash(18), PatternItem.gap(10)],
                 ),
             },
             circles: {
+              if (isOffRoute && routeGuidance != null)
+                Circle(
+                  circleId: const CircleId('route_start_area'),
+                  center: routeGuidance.nearestPoint,
+                  radius: 55,
+                  fillColor: Colors.orange.withValues(alpha: 0.16),
+                  strokeColor: Colors.orange.shade800,
+                  strokeWidth: 3,
+                ),
               if (nearestWait != null)
                 Circle(
                   circleId: const CircleId('nearest_wait_area'),
@@ -1788,64 +2122,33 @@ class _DriverTrackingMapState extends State<_DriverTrackingMap> {
                 ),
             },
           ),
-          if (nearestWait != null)
+          if (isOffRoute && routeGuidance != null)
             PositionedDirectional(
               start: 10,
               end: 10,
               top: 10,
-              child: Material(
-                color: Colors.white,
-                elevation: 4,
-                borderRadius: BorderRadius.circular(14),
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(14),
-                  onTap: () => _focusOnWait(nearestWait),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 10,
-                    ),
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 42,
-                          height: 42,
-                          decoration: BoxDecoration(
-                            color: Colors.orange.shade100,
-                            shape: BoxShape.circle,
-                          ),
-                          child: Icon(
-                            Icons.navigation,
-                            color: Colors.orange.shade900,
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                'روح لهنا',
-                                style: Theme.of(context).textTheme.titleMedium
-                                    ?.copyWith(fontWeight: FontWeight.w900),
-                              ),
-                              Text(
-                                distance == null
-                                    ? 'أقرب راكب محدد على الخريطة'
-                                    : roadRouteLoaded
-                                    ? 'طريق الشوارع إلى أقرب راكب، يبعد ${_formatDistance(distance)}'
-                                    : 'خط مباشر مؤقت، يبعد ${_formatDistance(distance)}',
-                                style: TextStyle(color: Colors.grey.shade700),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const Icon(Icons.center_focus_strong),
-                      ],
-                    ),
-                  ),
-                ),
+              child: _DriverMapBanner(
+                icon: Icons.navigation,
+                title: 'روح لهنا',
+                message:
+                    'يبعد ${_formatDistance(routeGuidance.distanceMeters)} عن الخط، حتى يبدأ التتبع مالتك.',
+                onTap: () => _focusOnRoutePoint(routeGuidance),
+              ),
+            )
+          else if (nearestWait != null)
+            PositionedDirectional(
+              start: 10,
+              end: 10,
+              top: 10,
+              child: _DriverMapBanner(
+                icon: Icons.navigation,
+                title: 'روح لهنا',
+                message: distance == null
+                    ? 'أقرب راكب محدد على الخريطة'
+                    : roadRouteLoaded
+                        ? 'طريق الشوارع إلى أقرب راكب، يبعد ${_formatDistance(distance)}'
+                        : 'خط مباشر مؤقت، يبعد ${_formatDistance(distance)}',
+                onTap: () => _focusOnWait(nearestWait),
               ),
             ),
         ],
@@ -1854,6 +2157,10 @@ class _DriverTrackingMapState extends State<_DriverTrackingMap> {
   }
 
   LatLng? get _initialCenter {
+    final routeGuidance = _routeGuidance;
+    if (routeGuidance?.isOffRoute == true) {
+      return routeGuidance!.nearestPoint;
+    }
     final nearestWait = _nearestWait;
     if (nearestWait != null) {
       return LatLng(nearestWait.lat, nearestWait.lng);
@@ -1874,15 +2181,26 @@ class _DriverTrackingMapState extends State<_DriverTrackingMap> {
   }
 
   Set<Marker> get _markers {
-    final nearestWait = _nearestWait;
-    return {
-      for (final stop in widget.stops)
+    final routeGuidance = _routeGuidance;
+    final isOffRoute = routeGuidance?.isOffRoute == true;
+    final nearestWait = isOffRoute ? null : _nearestWait;
+    final markers = <Marker>{};
+
+    for (final stop in widget.stops) {
+      // Skip rendering the stop if there is a passenger wait at the exact same location
+      final hasWait = widget.waits.any((w) =>
+          (w.lat - stop.lat).abs() < 0.0001 &&
+          (w.lng - stop.lng).abs() < 0.0001);
+      if (hasWait) continue;
+
+      markers.add(
         Marker(
           markerId: MarkerId('stop_${stop.id}'),
           position: LatLng(stop.lat, stop.lng),
+          anchor: const Offset(0.5, 0.5),
           icon: stop.isMajor
-              ? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure)
-              : BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueCyan),
+              ? (_majorStopIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure))
+              : (_minorStopIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueCyan)),
           infoWindow: InfoWindow(
             title: stop.nameAr,
             snippet: stop.landmarkAr.isEmpty
@@ -1891,22 +2209,50 @@ class _DriverTrackingMapState extends State<_DriverTrackingMap> {
           ),
           zIndexInt: stop.isMajor ? 4 : 3,
         ),
-      for (final wait in widget.waits)
+      );
+    }
+
+    for (final wait in widget.waits) {
+      markers.add(
         Marker(
           markerId: MarkerId('wait_${wait.id}'),
           position: LatLng(wait.lat, wait.lng),
-          icon: BitmapDescriptor.defaultMarkerWithHue(
-            wait.id == nearestWait?.id
-                ? BitmapDescriptor.hueOrange
-                : BitmapDescriptor.hueYellow,
-          ),
+          anchor: const Offset(0.5, 0.5),
+          icon: _passengerIcons['${wait.id}_${widget.waits.indexOf(wait) + 1}_${wait.id == nearestWait?.id}'] ??
+              BitmapDescriptor.defaultMarkerWithHue(
+                wait.id == nearestWait?.id
+                    ? BitmapDescriptor.hueOrange
+                    : BitmapDescriptor.hueYellow,
+              ),
           infoWindow: InfoWindow(
-            title: wait.id == nearestWait?.id ? 'روح لهنا' : 'راكب ينتظر',
+            title: wait.id == nearestWait?.id
+                ? 'روح لهنا • راكب ${widget.waits.indexOf(wait) + 1}'
+                : 'راكب ${widget.waits.indexOf(wait) + 1} ينتظر',
             snippet: 'ظاهر للسائقين',
           ),
           zIndexInt: wait.id == nearestWait?.id ? 14 : 8,
         ),
-      if (widget.lastPosition != null)
+      );
+    }
+
+    if (isOffRoute && routeGuidance != null) {
+      markers.add(
+        Marker(
+          markerId: const MarkerId('route_start_target'),
+          position: routeGuidance.nearestPoint,
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
+          anchor: const Offset(0.5, 0.5),
+          infoWindow: const InfoWindow(
+            title: 'روح لهنا',
+            snippet: 'أقرب نقطة على الخط حتى يبدأ التتبع',
+          ),
+          zIndexInt: 16,
+        ),
+      );
+    }
+
+    if (widget.lastPosition != null) {
+      markers.add(
         Marker(
           markerId: const MarkerId('driver_vehicle'),
           position: LatLng(
@@ -1919,7 +2265,10 @@ class _DriverTrackingMapState extends State<_DriverTrackingMap> {
           infoWindow: const InfoWindow(title: 'موقع كيتك الحالي'),
           zIndexInt: 12,
         ),
-    };
+      );
+    }
+
+    return markers;
   }
 
   PassengerWaitPoint? get _nearestWait {
@@ -1944,7 +2293,22 @@ class _DriverTrackingMapState extends State<_DriverTrackingMap> {
     );
   }
 
+  DriverRouteGuidance? get _routeGuidance {
+    final position = widget.lastPosition;
+    if (position == null || widget.stops.length < 2) return null;
+    return DriverRouteGuidance.fromStops(
+      stops: widget.stops,
+      position: LatLng(position.latitude, position.longitude),
+      thresholdMeters: widget.routeSnapThresholdMeters,
+    );
+  }
+
   void _focusBestTarget() {
+    final routeGuidance = _routeGuidance;
+    if (routeGuidance?.isOffRoute == true) {
+      _focusOnRoutePoint(routeGuidance!);
+      return;
+    }
     final nearestWait = _nearestWait;
     if (nearestWait != null) {
       _focusOnWait(nearestWait);
@@ -1960,6 +2324,25 @@ class _DriverTrackingMapState extends State<_DriverTrackingMap> {
         ),
       );
     }
+  }
+
+  void _focusOnRoutePoint(DriverRouteGuidance guidance) {
+    final position = widget.lastPosition;
+    if (position == null) {
+      controller?.animateCamera(
+        CameraUpdate.newLatLngZoom(guidance.nearestPoint, 16),
+      );
+      return;
+    }
+    controller?.animateCamera(
+      CameraUpdate.newLatLngBounds(
+        _boundsFor([
+          LatLng(position.latitude, position.longitude),
+          guidance.nearestPoint,
+        ]),
+        72,
+      ),
+    );
   }
 
   void _focusOnWait(PassengerWaitPoint wait) {
@@ -1986,6 +2369,15 @@ class _DriverTrackingMapState extends State<_DriverTrackingMap> {
     return [
       LatLng(position.latitude, position.longitude),
       LatLng(wait.lat, wait.lng),
+    ];
+  }
+
+  List<LatLng> _routeGuidancePoints(DriverRouteGuidance? guidance) {
+    final position = widget.lastPosition;
+    if (position == null || guidance == null) return const [];
+    return [
+      LatLng(position.latitude, position.longitude),
+      guidance.nearestPoint,
     ];
   }
 
@@ -2114,6 +2506,78 @@ class _DriverTrackingMapState extends State<_DriverTrackingMap> {
       }
     } catch (_) {}
   }
+}
+
+class DriverRouteGuidance {
+  const DriverRouteGuidance({
+    required this.nearestPoint,
+    required this.distanceMeters,
+    required this.isOffRoute,
+  });
+
+  final LatLng nearestPoint;
+  final double distanceMeters;
+  final bool isOffRoute;
+
+  factory DriverRouteGuidance.fromStops({
+    required List<DriverStop> stops,
+    required LatLng position,
+    required double thresholdMeters,
+  }) {
+    final nearest = _nearestPointOnDriverRoute(position, stops);
+    final distance = Geolocator.distanceBetween(
+      position.latitude,
+      position.longitude,
+      nearest.latitude,
+      nearest.longitude,
+    );
+    return DriverRouteGuidance(
+      nearestPoint: nearest,
+      distanceMeters: distance,
+      isOffRoute: distance > thresholdMeters,
+    );
+  }
+}
+
+LatLng _nearestPointOnDriverRoute(LatLng point, List<DriverStop> stops) {
+  if (stops.isEmpty) return point;
+  if (stops.length == 1) return LatLng(stops.first.lat, stops.first.lng);
+
+  var nearestPoint = LatLng(stops.first.lat, stops.first.lng);
+  var minDistance = double.infinity;
+  for (var index = 0; index < stops.length - 1; index += 1) {
+    final projected = _projectPointToDriverSegment(
+      point,
+      LatLng(stops[index].lat, stops[index].lng),
+      LatLng(stops[index + 1].lat, stops[index + 1].lng),
+    );
+    final distance = Geolocator.distanceBetween(
+      point.latitude,
+      point.longitude,
+      projected.latitude,
+      projected.longitude,
+    );
+    if (distance < minDistance) {
+      minDistance = distance;
+      nearestPoint = projected;
+    }
+  }
+  return nearestPoint;
+}
+
+LatLng _projectPointToDriverSegment(LatLng point, LatLng start, LatLng end) {
+  final x = point.longitude;
+  final y = point.latitude;
+  final x1 = start.longitude;
+  final y1 = start.latitude;
+  final x2 = end.longitude;
+  final y2 = end.latitude;
+  final dx = x2 - x1;
+  final dy = y2 - y1;
+  final lenSq = dx * dx + dy * dy;
+  var t = lenSq == 0 ? 0.0 : ((x - x1) * dx + (y - y1) * dy) / lenSq;
+  t = t.clamp(0.0, 1.0);
+  return LatLng(y1 + dy * t, x1 + dx * t);
 }
 
 String _formatDistance(double meters) {

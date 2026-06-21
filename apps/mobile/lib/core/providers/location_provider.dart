@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
+import '../utils/location_helper.dart';
 
 final locationProvider = FutureProvider<Position?>((ref) async {
   final enabled = await Geolocator.isLocationServiceEnabled();
@@ -12,5 +13,5 @@ final locationProvider = FutureProvider<Position?>((ref) async {
       permission == LocationPermission.deniedForever) {
     return null;
   }
-  return Geolocator.getCurrentPosition();
+  return KiyatLocation.getCurrentPosition();
 });

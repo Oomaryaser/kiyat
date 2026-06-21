@@ -13,13 +13,61 @@ const _phoneKey = 'driver_phone';
 
 class DriverRepository {
   DriverRepository()
-    : _dio = Dio(
-        BaseOptions(
-          baseUrl: apiBaseUrl,
-          connectTimeout: const Duration(seconds: 3),
-          receiveTimeout: const Duration(seconds: 5),
-        ),
-      );
+      : _dio = Dio(
+          BaseOptions(
+            baseUrl: apiBaseUrl,
+            connectTimeout: const Duration(seconds: 10),
+            receiveTimeout: const Duration(seconds: 30),
+          ),
+        ) {
+    _dio.interceptors.add(
+      InterceptorsWrapper(
+        onRequest: (options, handler) async {
+          final prefs = await SharedPreferences.getInstance();
+          final token = prefs.getString(_accessTokenKey);
+          if (token != null) {
+            options.headers['Authorization'] = 'Bearer $token';
+          }
+          handler.next(options);
+        },
+        onError: (error, handler) async {
+          if (error.response?.statusCode == 401) {
+            if (error.requestOptions.path == '/auth/refresh') {
+              handler.next(error);
+              return;
+            }
+            final prefs = await SharedPreferences.getInstance();
+            final refresh = prefs.getString(_refreshTokenKey);
+            if (refresh != null) {
+              try {
+                final refreshDio = Dio(BaseOptions(baseUrl: apiBaseUrl));
+                final response = await refreshDio.post<Map<String, dynamic>>(
+                  '/auth/refresh',
+                  data: {'refreshToken': refresh},
+                );
+                final data = response.data;
+                final newAccess = data?['accessToken'] as String?;
+                final newRefresh = data?['refreshToken'] as String?;
+                if (newAccess != null && newRefresh != null) {
+                  await prefs.setString(_accessTokenKey, newAccess);
+                  await prefs.setString(_refreshTokenKey, newRefresh);
+                  error.requestOptions.headers['Authorization'] = 'Bearer $newAccess';
+                  final retry = await _dio.fetch<dynamic>(error.requestOptions);
+                  handler.resolve(retry);
+                  return;
+                }
+              } catch (_) {
+                await prefs.remove(_accessTokenKey);
+                await prefs.remove(_refreshTokenKey);
+                await prefs.remove(_phoneKey);
+              }
+            }
+          }
+          handler.next(error);
+        },
+      ),
+    );
+  }
 
   final Dio _dio;
 

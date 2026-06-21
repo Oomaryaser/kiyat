@@ -1,5 +1,5 @@
 import { Type } from "class-transformer";
-import { IsNumber, IsOptional, IsString, IsUUID } from "class-validator";
+import { IsNumber, IsOptional, IsString, IsUUID, Matches } from "class-validator";
 
 export class RouteArrivalQueryDto {
   @IsOptional()
@@ -19,6 +19,7 @@ export class RouteArrivalQueryDto {
 
 export class StartPassengerWaitDto {
   @IsString()
+  @Matches(/^(passenger|test)-\d+$/, { message: "Invalid anonymous session ID format" })
   anonymousSessionId!: string;
 
   @Type(() => Number)

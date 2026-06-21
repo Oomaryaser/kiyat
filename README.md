@@ -1,90 +1,111 @@
-# كيات
+# 🚖 كية-آيت (Kiyat) - نظام تتبع النقل العام الذكي في بغداد
 
-كيات is an Iraqi public transit information app. This repository is a Baghdad MVP monorepo with:
+تطبيق **كية-آيت** هو منصة متكاملة لتتبع وتحسين النقل العام في مدينة بغداد (خاصة خطوط الـ "كية" والـ "كوستر")، حيث يهدف المشروع إلى حل مشكلة عدم انتظام مواعيد وتوفر وسائل النقل عبر توفير تتبع حي ومباشر للمركبات، وتحديد فترات الانتظار بدقة للركاب.
 
-- `apps/mobile`: Flutter passenger app with Arabic RTL UI.
-- `apps/backend`: NestJS API with PostgreSQL/PostGIS, Redis, JWT auth, Swagger, and Socket.IO tracking.
-- `packages/shared-types`: Shared TypeScript interfaces and enums.
-- `infra`: Docker Compose for local PostgreSQL/PostGIS and Redis.
+تعتمد هذه المستودع (Monorepo) على بنية مرنة مقسمة إلى ثلاثة تطبيقات رئيسية لخدمة الركاب والسائقين والتحكم بالبيانات.
 
-## Quick Start
+---
 
+## 📂 هيكلية المشروع (Repository Structure)
+
+المشروع مبني كـ Monorepo باستخدام npm Workspaces ويحتوي على الأقسام التالية:
+
+* **`apps/mobile` (تطبيق الراكب)**: تطبيق Flutter بواجهات عربية (RTL) متوافقة مع الهوية البصرية الحديثة، يدعم تتبع الكيات على الخريطة، تحديد نقاط الصعود، وتنبيهات الاقتراب الذكية.
+* **`apps/driver` (تطبيق السائق)**: تطبيق Flutter مخصص لسائقي الكيات، يقوم بمشاركة الموقع الحي للمركبة مع السيرفر وعرض الركاب المنتظرين على الخط كدبابيس مرقمة ومرتبة جغرافياً.
+* **`apps/backend` (خادم النظام)**: سيرفر NestJS قوي يعتمد على:
+  * **PostgreSQL + PostGIS**: لتخزين المسارات والنقاط الجغرافية وإجراء الاستعلامات المكانية.
+  * **Redis**: لإدارة التخزين المؤقت وحساب اللقاءات الفورية بين الكيات والركاب وجلسات تتبع الصعود.
+  * **Socket.IO**: للبث اللحظي السريع لمواقع الكيات والركاب.
+* **`packages/shared-types`**: حزمة مشتركة لتعريف واجهات الـ TypeScript والأنماط (Enums) المشتركة بين الخادم والخدمات الأخرى.
+* **`infra`**: إعدادات بيئة التشغيل المحلية باستخدام Docker Compose لتشغيل PostgreSQL و Redis بضغطة زر واحدة.
+
+---
+
+## ✨ المميزات التقنية الرئيسية
+
+### ١. خريطة تفاعلية ونقاط صعود مرقمة
+* يعرض تطبيق السائق نقاط انتظار الركاب كـ **دوائر برتقالية مرقمة** بحسب أقدمية الانتظار، بدلاً من الدبابيس التقليدية، مع معالجة ذكية لمنع تداخل مؤشرات الركاب مع مواقف الخطوط الثابتة وتعديل إحداثيات التركيز الجغرافي (`const Offset(0.5, 0.5)`).
+
+### ٢. منطق صعود الركاب التلقائي الذكي (Boarding Fallback Hierarchy)
+يتضمن النظام منطقاً برمجياً متعدد المستويات وخوارزميات متقدمة لتأكيد صعود الراكب للكية تلقائياً:
+1. **الأولوية الأولى (يدوي)**: زر تأكيد فوري يضغط عليه الراكب بمجرد صعوده.
+2. **الأولوية الثانية (تقارب جغرافي ذكي)**: يتم تأكيد الصعود تلقائياً إذا اقتربت الكية من الراكب لمسافة أقل من المسافة الديناميكية المحددة واستمرت لـ 10 ثوانٍ مع تحرك السيارة مسافة 25 متراً على الأقل (لتفادي تسجيل الصعود الوهمي بالازدحامات).
+3. **الأولوية الثالثة (مطابقة السرعة والاتجاه)**: مزامنة حركة الراكب والكية في نفس اتجاه السير (بفارق زاوية $\le$ 45 درجة) واستمرار هذا التطابق لـ 20 ثانية متواصلة لحل مشاكل تذبذب المواقع (Candidate Flapping) عبر تطبيق مرشح **Hysteresis** (منع التبديل إلا بفارق 15 نقطة مطابقة).
+
+### ٣. حماية خصوصية الراكب والبطارية
+* بمجرد إتمام الصعود (يدوياً أو تلقائياً)، يتم فوراً إيقاف بث الموقع الجغرافي للراكب وتدمير مستمع الـ GPS بهاتفه لتوفير طاقة البطارية ومسح جلسة الانتظار من ذاكرة الـ Redis.
+
+### ٤. فلترة دقة الـ GPS وتجنب تأثير الـ VPN
+* يتم استبعاد التحديثات الجغرافية الضعيفة التي تتجاوز دقتها 50 متراً لحماية البيانات.
+* يتضمن التطبيق نظام **VPN Simulator Override**؛ ففي بيئات التطوير داخل العراق، إذا تم اكتشاف موقع جغرافي خارج حدود العراق (بسبب تشغيل VPN على المحاكي)، يقوم التطبيق تلقائياً بمحاكاة وتثبيت الموقع في مركز بغداد (ساحة التحرير/الباب الشرقي) لتمكين المطور من فحص الخطوط والانتظار دون عقبات.
+
+---
+
+## 🛠️ التقنيات المستخدمة (Tech Stack)
+
+| المكون | التقنيات الأساسية |
+| :--- | :--- |
+| **تطبيقات الموبايل** | Flutter, Dart, Riverpod (إدارة الحالة), Google Maps SDK, Dio |
+| **الخلفية (Backend)** | NestJS, TypeScript, TypeORM, Socket.IO, Class Validator |
+| **قواعد البيانات والتخزين** | PostgreSQL (PostGIS للتوسعات الجغرافية), Redis (ioredis) |
+| **البنية التحتية** | Docker & Docker Compose |
+
+---
+
+## 🚀 طريقة التشغيل والتهيئة المحلية (Quick Start)
+
+### المتطلبات الأساسية
+* تثبيت **Node.js** (إصدار 18 فما فوق).
+* تثبيت **Docker** و **Docker Compose**.
+* تثبيت **Flutter SDK** لبيئة التطوير للموبايل.
+
+### ١. تهيئة المتغيرات والاعتماديات
+من المجلد الرئيسي للمشروع، قم بتنفيذ الخطوات التالية:
 ```bash
-cd kiyat
+# استنساخ ملف الإعدادات البيئية
 cp .env.example .env
+
+# تثبيت الاعتماديات لجميع حزم الـ Monorepo
 npm install
-docker compose -f infra/docker-compose.yml up -d postgres redis
-npm run backend:dev
 ```
 
-Swagger is available at:
-
-```text
-http://localhost:3000/api/docs
-```
-
-Seed Baghdad sample routes after the database is running:
-
+### ٢. تشغيل الخدمات الأساسية (Database & Redis)
+شغّل حاويات PostgreSQL الجغرافية و Redis عبر Docker:
 ```bash
+docker compose -f infra/docker-compose.yml up -d postgres redis
+```
+
+### ٣. تشغيل السيرفر وتغذية البيانات (Seeding)
+قم بإنشاء جداول قاعدة البيانات عبر تشغيل الهجرة (Migrations) ثم تغذية المسارات الافتراضية لمدينة بغداد:
+```bash
+# بناء السيرفر وتشغيله في وضع التطوير
+npm run backend:dev
+
+# في نافذة أوامر جديدة: تغذية خطوط بغداد (مثال: الباب الشرقي - الكاظمية)
 npm run backend:seed
 ```
+*سيكون توثيق الـ API متاحاً عبر Swagger على الرابط: `http://localhost:3000/api/docs`*
+*ملاحظة: كود الـ OTP في بيئة التطوير مُثبّت دائماً على القيمة `123456` لسهولة تسجيل الدخول التجريبي.*
 
-## Backend Notes
+### ٤. تشغيل تطبيق الراكب وسائق الكية
 
-The API includes:
-
-- `POST /auth/send-otp`
-- `POST /auth/verify-otp`
-- `POST /auth/refresh`
-- `GET /routes`
-- `GET /routes/:id`
-- `GET /routes/nearby?lat=&lng=&radius=`
-- `GET /routes/search?from=&to=`
-- `POST /routes`
-- `PATCH /routes/:id`
-- `GET /stops`
-- `GET /stops/nearby?lat=&lng=&radius=`
-- `POST /stops`
-- `POST /reports`
-- `GET /reports`
-- `PATCH /reports/:id`
-- `GET /saved-routes?userId=`
-- `POST /saved-routes`
-- `DELETE /saved-routes/:id`
-
-Socket.IO tracking namespace:
-
-```text
-/tracking
-```
-
-Events:
-
-- `vehicle:location` with `{ vehicleId, lat, lng }`
-- `vehicle:subscribe` with `{ routeId }`
-- `vehicle:update` broadcast to subscribers
-
-OTP sending is stubbed and logs `123456` to the backend console.
-
-## Mobile Notes
-
+#### لتشغيل تطبيق الراكب (mobile):
 ```bash
 cd apps/mobile
 flutter pub get
-flutter run --dart-define=API_URL=http://localhost:3000
+flutter run
 ```
 
-The theme is configured for Arabic-first RTL and the Tajawal font family. Add Tajawal font files or configure a font package before production release.
-
-## Local Infra
-
+#### لتشغيل تطبيق السائق (driver):
 ```bash
-docker compose -f infra/docker-compose.yml up --build
+cd apps/driver
+flutter pub get
+flutter run
 ```
 
-Services:
+---
 
-- PostgreSQL/PostGIS: `localhost:5432`
-- Redis: `localhost:6379`
-- Backend: `localhost:3000`
-# kiyat
+## 🛡️ أمن وحماية النظام (Security)
+* قمنا بتأمين جميع مسارات تعديل وإنشاء الخطوط والمواقف والتقارير في السيرفر باستخدام حراس التحقق والـ JWT (`JwtAuthGuard` و `OperatorAuthGuard`).
+* تم تفعيل حماية ضد إغراق الطلبات (Rate Limiting) على خادم Redis للطلبات الجغرافية للركاب.
+* جميع اتصالات البث الحي عبر WebSockets تتطلب إرسال الـ Bearer Token في رأس طلب الاتصال لتوثيق هوية الأجهزة المتصلة ومنع انتحال الشخصية.

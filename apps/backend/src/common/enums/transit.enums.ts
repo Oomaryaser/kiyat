@@ -42,3 +42,9 @@ export enum PassengerWaitStatus {
   Boarded = 'boarded',
   Cancelled = 'cancelled',
 }
+
+export enum TripCrowdingLevel {
+  Low = 'low',
+  Medium = 'medium',
+  High = 'high',
+}

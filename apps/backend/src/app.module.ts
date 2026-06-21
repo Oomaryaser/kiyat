@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { AnalyticsModule } from './analytics/analytics.module';
 import { AuthModule } from './auth/auth.module';
 import { CommunityReport } from './reports/community-report.entity';
 import { ReportsModule } from './reports/reports.module';
@@ -14,6 +15,8 @@ import { StopsModule } from './stops/stops.module';
 import { TrackingModule } from './tracking/tracking.module';
 import { PassengerWait } from './tracking/passenger-wait.entity';
 import { Vehicle } from './tracking/vehicle.entity';
+import { TripRating } from './trip-ratings/trip-rating.entity';
+import { TripRatingsModule } from './trip-ratings/trip-ratings.module';
 import { User } from './users/user.entity';
 import { UsersModule } from './users/users.module';
 
@@ -25,8 +28,8 @@ import { UsersModule } from './users/users.module';
       useFactory: (config: ConfigService) => ({
         type: 'postgres',
         url: config.getOrThrow<string>('DATABASE_URL'),
-        entities: [TransitRoute, Stop, RouteStop, Vehicle, PassengerWait, User, CommunityReport, SavedRoute],
-        synchronize: config.get<string>('TYPEORM_SYNC', 'true') === 'true',
+        entities: [TransitRoute, Stop, RouteStop, Vehicle, PassengerWait, User, CommunityReport, SavedRoute, TripRating],
+        synchronize: config.get<string>('TYPEORM_SYNC', 'false') === 'true',
         logging: config.get<string>('TYPEORM_LOGGING', 'false') === 'true',
       }),
     }),
@@ -37,6 +40,8 @@ import { UsersModule } from './users/users.module';
     ReportsModule,
     SavedRoutesModule,
     UsersModule,
+    TripRatingsModule,
+    AnalyticsModule,
   ],
 })
 export class AppModule {}

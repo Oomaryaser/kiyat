@@ -47,13 +47,16 @@ class PassengerNotifications {
   Future<void> showArrivalAlert({
     required String vehicleLabel,
     required int etaMinutes,
+    bool arrived = false,
   }) async {
     if (kIsWeb) return;
     await initialize();
     await _plugin.show(
       id: 21,
-      title: 'الكية قربت',
-      body: '$vehicleLabel توصل تقريباً خلال $etaMinutes دقيقة.',
+      title: arrived ? 'الكية وصلت' : 'الكية قربت',
+      body: arrived
+          ? '$vehicleLabel وصلت تقريباً لنقطة صعودك. اطلع الحين.'
+          : '$vehicleLabel توصل تقريباً خلال $etaMinutes دقيقة.',
       notificationDetails: const NotificationDetails(
         android: AndroidNotificationDetails(
           'kiyat_arrivals',

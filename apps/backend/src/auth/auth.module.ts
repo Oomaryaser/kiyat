@@ -5,11 +5,12 @@ import { UsersModule } from "../users/users.module";
 import { AuthController } from "./auth.controller";
 import { AuthService } from "./auth.service";
 import { OperatorAuthGuard } from "./operator-auth.guard";
+import { JwtAuthGuard } from "./jwt-auth.guard";
 
 @Module({
   imports: [ConfigModule, JwtModule.register({}), UsersModule],
   controllers: [AuthController],
-  providers: [AuthService, OperatorAuthGuard],
-  exports: [OperatorAuthGuard],
+  providers: [AuthService, OperatorAuthGuard, JwtAuthGuard],
+  exports: [OperatorAuthGuard, JwtAuthGuard, JwtModule],
 })
 export class AuthModule {}

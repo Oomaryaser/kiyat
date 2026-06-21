@@ -1,7 +1,8 @@
-import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
-import { ApiTags } from '@nestjs/swagger';
+import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CreateRouteDto, ListRoutesDto, NearbyRoutesDto, SearchRoutesDto } from './routes.dto';
 import { RoutesService } from './routes.service';
+import { OperatorAuthGuard } from '../auth/operator-auth.guard';
 
 @ApiTags('routes')
 @Controller('routes')
@@ -29,11 +30,15 @@ export class RoutesController {
   }
 
   @Post()
+  @UseGuards(OperatorAuthGuard)
+  @ApiBearerAuth()
   create(@Body() dto: CreateRouteDto) {
     return this.routes.create(dto);
   }
 
   @Patch(':id')
+  @UseGuards(OperatorAuthGuard)
+  @ApiBearerAuth()
   update(@Param('id') id: string, @Body() dto: Partial<CreateRouteDto>) {
     return this.routes.update(id, dto);
   }

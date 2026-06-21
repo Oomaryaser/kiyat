@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 
+import '../../core/utils/location_helper.dart';
 import '../../shared/data/transit_repository.dart';
 import '../../shared/models/transit_models.dart';
 import '../../shared/notifications/passenger_notifications.dart';
@@ -33,11 +35,14 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
   String? waitSyncError;
   double? pickupLat;
   double? pickupLng;
+  double? userLat;
+  double? userLng;
   bool autoLocateRequested = false;
   String? activeArrivalRequestKey;
   String? lastSelectedVehicleLabel;
   String? persistedRouteId;
   bool arrivalNoticeShown = false;
+  bool ratingPromptShown = false;
   RouteArrivalSnapshot? _lastArrivalSnapshot;
   StreamSubscription<Position>? _positionSubscription;
   Timer? _arrivalRefreshTimer;
@@ -176,6 +181,8 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
             waitStatus: waitStatus,
             waitIsVisible: _waitIsVisible,
             trackingIsStale: trackingIsStale,
+            userLocation: userLat != null && userLng != null ? LatLng(userLat!, userLng!) : null,
+            nearestRoutePoint: pickupLat != null && pickupLng != null ? LatLng(pickupLat!, pickupLng!) : null,
           ),
           const SizedBox(height: 12),
           _PassengerNextStepCard(
@@ -185,13 +192,15 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
             arrival: arrival,
             pickupStop: pickupStop,
             trackingIsStale: trackingIsStale,
+            userLocation: userLat != null && userLng != null ? LatLng(userLat!, userLng!) : null,
+            nearestRoutePoint: pickupLat != null && pickupLng != null ? LatLng(pickupLat!, pickupLng!) : null,
             onRetry: effectivePickupLat == null || effectivePickupLng == null
                 ? null
                 : () => _startPassengerWait(
                       route.id,
                       effectivePickupLat,
                       effectivePickupLng,
-                    ).then((_) => _startLocationStream()),
+                    ).then((_) => _startLocationStream(stops, route.id)),
             onUseCurrentLocation: () => _useCurrentLocation(stops, route.id),
           ),
           const SizedBox(height: 12),
@@ -202,13 +211,15 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
             pickupStop: pickupStop,
             usingCurrentLocation: usingCurrentLocation,
             locating: locating,
+            userLocation: userLat != null && userLng != null ? LatLng(userLat!, userLng!) : null,
+            nearestRoutePoint: pickupLat != null && pickupLng != null ? LatLng(pickupLat!, pickupLng!) : null,
             onRetry: effectivePickupLat == null || effectivePickupLng == null
                 ? null
                 : () => _startPassengerWait(
                       route.id,
                       effectivePickupLat,
                       effectivePickupLng,
-                    ).then((_) => _startLocationStream()),
+                    ).then((_) => _startLocationStream(stops, route.id)),
             onStopWaiting: _stopWaiting,
           ),
           const SizedBox(height: 12),
@@ -223,6 +234,8 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
             skippedCount: skippedCount,
             trackingIsStale: trackingIsStale,
             stops: stops,
+            userLocation: userLat != null && userLng != null ? LatLng(userLat!, userLng!) : null,
+            nearestRoutePoint: pickupLat != null && pickupLng != null ? LatLng(pickupLat!, pickupLng!) : null,
             onUseCurrentLocation: () => _useCurrentLocation(stops, route.id),
             onSelectPickup: () => _showPickupSelector(stops, route.id),
             onOpenLocationSettings: _openLocationSettings,
@@ -298,7 +311,7 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
     if (alertsEnabled &&
         !arrivalNoticeShown &&
         arrival != null &&
-        arrival.etaMinutes <= 2) {
+        arrival.notificationHint != null) {
       arrivalNoticeShown = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -311,6 +324,7 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
     passengerNotifications.showArrivalAlert(
       vehicleLabel: arrival.vehicleLabel,
       etaMinutes: arrival.etaMinutes,
+      arrived: arrival.notificationHint == 'arrived',
     );
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -324,7 +338,9 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
         icon: const Icon(Icons.notifications_active_outlined),
         title: const Text('الكية قربت'),
         content: Text(
-          '${arrival.vehicleLabel} توصل تقريباً خلال ${arrival.etaMinutes} دقيقة.',
+          arrival.notificationHint == 'arrived'
+              ? '${arrival.vehicleLabel} وصلت تقريباً لنقطة صعودك.'
+              : '${arrival.vehicleLabel} توصل تقريباً خلال ${arrival.etaMinutes} دقيقة.',
         ),
         actions: [
           TextButton(
@@ -380,7 +396,7 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
                       locationIssue = null;
                     });
                     _startPassengerWait(routeId, item.$2.lat, item.$2.lng)
-                        .then((_) => _startLocationStream());
+                        .then((_) => _startLocationStream(stops, routeId));
                     Navigator.pop(context);
                   },
                 ),
@@ -417,19 +433,27 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
         throw PermissionDeniedException(permission.name);
       }
 
-      final position = await Geolocator.getCurrentPosition();
+      final position = await KiyatLocation.getCurrentPosition();
       final nearestIndex =
           _nearestStopIndex(stops, position.latitude, position.longitude);
       if (!mounted) return;
+
+      final nearestOnLine = _findNearestPointOnRouteLine(
+        LatLng(position.latitude, position.longitude),
+        stops,
+      );
+
       setState(() {
+        userLat = position.latitude;
+        userLng = position.longitude;
         pickupStopIndex = nearestIndex;
         usingCurrentLocation = true;
-        pickupLat = position.latitude;
-        pickupLng = position.longitude;
+        pickupLat = nearestOnLine.latitude;
+        pickupLng = nearestOnLine.longitude;
       });
-      await _startPassengerWait(routeId, position.latitude, position.longitude);
+      await _startPassengerWait(routeId, pickupLat!, pickupLng!);
       if (!mounted) return;
-      _startLocationStream();
+      _startLocationStream(stops, routeId);
     } on LocationServiceDisabledException {
       if (!mounted) return;
       setState(() {
@@ -529,14 +553,14 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
     context.go('/');
   }
 
-  void _startLocationStream() {
+  void _startLocationStream(List<TransitStop> stops, String routeId) {
     final waitId = waitSessionId;
     if (waitId == null || waitId.isEmpty) return;
     _positionSubscription?.cancel();
-    _positionSubscription = Geolocator.getPositionStream(
+    _positionSubscription = KiyatLocation.getPositionStream(
       locationSettings: const LocationSettings(
         accuracy: LocationAccuracy.best,
-        distanceFilter: 35,
+        distanceFilter: 10,
       ),
     ).listen((position) async {
       final session =
@@ -558,12 +582,25 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
         });
         return;
       }
+
+      LatLng nextPickup = LatLng(pickupLat ?? position.latitude, pickupLng ?? position.longitude);
+      if (usingCurrentLocation) {
+        nextPickup = _findNearestPointOnRouteLine(
+          LatLng(position.latitude, position.longitude),
+          stops,
+        );
+      }
+
       setState(() {
         waitStatus = session.status;
         waitLastSyncedAt = DateTime.now();
         waitSyncError = null;
-        pickupLat = position.latitude;
-        pickupLng = position.longitude;
+        userLat = position.latitude;
+        userLng = position.longitude;
+        if (usingCurrentLocation) {
+          pickupLat = nextPickup.latitude;
+          pickupLng = nextPickup.longitude;
+        }
       });
       if (session.isBoarded) {
         await _positionSubscription?.cancel();
@@ -578,6 +615,7 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
             content: Text('اعتبرناك صعدت الكية، شلنا نقطة انتظارك.'),
           ),
         );
+        _showTripRatingSheet(routeId, waitId);
       }
     });
   }
@@ -588,8 +626,8 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
     pickupLng = lng;
     _waitHeartbeatTimer = Timer.periodic(const Duration(seconds: 45), (_) {
       final waitId = waitSessionId;
-      final nextLat = pickupLat;
-      final nextLng = pickupLng;
+      final nextLat = userLat ?? pickupLat;
+      final nextLng = userLng ?? pickupLng;
       if (waitId == null ||
           waitId.isEmpty ||
           waitStatus != 'waiting' ||
@@ -635,6 +673,189 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
     }
     return bestIndex;
   }
+
+  LatLng _findNearestPointOnRouteLine(LatLng point, List<TransitStop> stops) {
+    if (stops.isEmpty) return point;
+    LatLng nearestPoint = LatLng(stops.first.lat, stops.first.lng);
+    double minDistance = double.infinity;
+
+    for (int i = 0; i < stops.length - 1; i++) {
+      LatLng p1 = LatLng(stops[i].lat, stops[i].lng);
+      LatLng p2 = LatLng(stops[i + 1].lat, stops[i + 1].lng);
+      LatLng projected = _projectPointToSegment(point, p1, p2);
+      double dist = Geolocator.distanceBetween(
+        point.latitude,
+        point.longitude,
+        projected.latitude,
+        projected.longitude,
+      );
+      if (dist < minDistance) {
+        minDistance = dist;
+        nearestPoint = projected;
+      }
+    }
+    return nearestPoint;
+  }
+
+  LatLng _projectPointToSegment(LatLng p, LatLng p1, LatLng p2) {
+    double x = p.longitude;
+    double y = p.latitude;
+    double x1 = p1.longitude;
+    double y1 = p1.latitude;
+    double x2 = p2.longitude;
+    double y2 = p2.latitude;
+
+    double dx = x2 - x1;
+    double dy = y2 - y1;
+    double lenSq = dx * dx + dy * dy;
+
+    double t = lenSq == 0 ? 0 : ((x - x1) * dx + (y - y1) * dy) / lenSq;
+    t = t.clamp(0.0, 1.0);
+
+    return LatLng(y1 + dy * t, x1 + dx * t);
+  }
+
+  void _showTripRatingSheet(String routeId, String waitId) {
+    if (ratingPromptShown) return;
+    ratingPromptShown = true;
+    var rating = 5;
+    var cleanliness = 5;
+    var crowding = 'medium';
+    var priceFair = true;
+    final commentController = TextEditingController();
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            Future<void> submit() async {
+              final success = await ref.read(transitRepositoryProvider).submitTripRating(
+                    routeId: routeId,
+                    passengerWaitId: waitId,
+                    rating: rating,
+                    crowdingLevel: crowding,
+                    priceFair: priceFair,
+                    cleanlinessRating: cleanliness,
+                    comment: commentController.text,
+                  );
+              if (!context.mounted) return;
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(
+                    success
+                        ? 'شكراً، سجلنا تقييمك للرحلة.'
+                        : 'ما قدرنا نسجل التقييم حالياً.',
+                  ),
+                ),
+              );
+            }
+
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 18,
+                right: 18,
+                top: 18,
+                bottom: MediaQuery.of(context).viewInsets.bottom + 18,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text('كيف كانت الكية؟', style: Theme.of(context).textTheme.titleLarge),
+                  const SizedBox(height: 12),
+                  _RatingStars(
+                    value: rating,
+                    onChanged: (value) => setSheetState(() => rating = value),
+                  ),
+                  const SizedBox(height: 14),
+                  SegmentedButton<String>(
+                    segments: const [
+                      ButtonSegment(value: 'low', label: Text('خفيف')),
+                      ButtonSegment(value: 'medium', label: Text('متوسط')),
+                      ButtonSegment(value: 'high', label: Text('مزدحم')),
+                    ],
+                    selected: {crowding},
+                    onSelectionChanged: (value) {
+                      setSheetState(() => crowding = value.first);
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('السعر كان مناسب'),
+                    value: priceFair,
+                    onChanged: (value) => setSheetState(() => priceFair = value),
+                  ),
+                  Row(
+                    children: [
+                      const Expanded(child: Text('النظافة')),
+                      _RatingStars(
+                        value: cleanliness,
+                        compact: true,
+                        onChanged: (value) => setSheetState(() => cleanliness = value),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: commentController,
+                    maxLines: 2,
+                    decoration: const InputDecoration(
+                      hintText: 'ملاحظة اختيارية',
+                      prefixIcon: Icon(Icons.notes_outlined),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  FilledButton(
+                    onPressed: submit,
+                    child: const Text('إرسال التقييم'),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    ).whenComplete(commentController.dispose);
+  }
+}
+
+class _RatingStars extends StatelessWidget {
+  const _RatingStars({
+    required this.value,
+    required this.onChanged,
+    this.compact = false,
+  });
+
+  final int value;
+  final ValueChanged<int> onChanged;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (var index = 1; index <= 5; index += 1)
+          IconButton(
+            visualDensity: compact ? VisualDensity.compact : null,
+            padding: compact ? EdgeInsets.zero : null,
+            constraints: compact
+                ? const BoxConstraints.tightFor(width: 34, height: 34)
+                : null,
+            onPressed: () => onChanged(index),
+            icon: Icon(
+              index <= value ? Icons.star_rounded : Icons.star_border_rounded,
+              color: Colors.amber.shade700,
+              size: compact ? 24 : 32,
+            ),
+          ),
+      ],
+    );
+  }
 }
 
 class _ArrivalCard extends StatelessWidget {
@@ -652,6 +873,8 @@ class _ArrivalCard extends StatelessWidget {
     required this.onUseCurrentLocation,
     required this.onSelectPickup,
     required this.onOpenLocationSettings,
+    this.userLocation,
+    this.nearestRoutePoint,
   });
 
   final TransitStop? pickupStop;
@@ -667,6 +890,8 @@ class _ArrivalCard extends StatelessWidget {
   final VoidCallback onUseCurrentLocation;
   final VoidCallback onSelectPickup;
   final VoidCallback onOpenLocationSettings;
+  final LatLng? userLocation;
+  final LatLng? nearestRoutePoint;
 
   @override
   Widget build(BuildContext context) {
@@ -763,6 +988,8 @@ class _ArrivalCard extends StatelessWidget {
               pickupStop: selectedPickupStop,
               selectedVehicle: arrival,
               compact: true,
+              userLocation: userLocation,
+              nearestRoutePoint: nearestRoutePoint,
             ),
           ),
           const SizedBox(height: 12),
@@ -782,8 +1009,20 @@ class _ArrivalCard extends StatelessWidget {
             _StatusLine(
               icon: Icons.timer_outlined,
               label: 'توصل خلال',
-              value: '${arrival!.etaMinutes} دقيقة تقريباً',
+              value:
+                  '${arrival!.etaMinutes} دقيقة تقريباً (${arrival!.etaConfidenceLabel})',
             ),
+            if (arrival!.lastSeenSeconds != null) ...[
+              const SizedBox(height: 8),
+              _StatusLine(
+                icon: Icons.sensors,
+                label: 'آخر تحديث',
+                value: _secondsAgoArabic(arrival!.lastSeenSeconds!),
+                color: arrival!.etaConfidence == 'low'
+                    ? Colors.red.shade700
+                    : null,
+              ),
+            ],
             if (skippedCount > 0) ...[
               const SizedBox(height: 8),
               _StatusLine(
@@ -941,6 +1180,8 @@ class _PassengerNextStepCard extends StatelessWidget {
     required this.trackingIsStale,
     required this.onRetry,
     required this.onUseCurrentLocation,
+    this.userLocation,
+    this.nearestRoutePoint,
   });
 
   final bool waitIsVisible;
@@ -951,14 +1192,28 @@ class _PassengerNextStepCard extends StatelessWidget {
   final bool trackingIsStale;
   final VoidCallback? onRetry;
   final VoidCallback onUseCurrentLocation;
+  final LatLng? userLocation;
+  final LatLng? nearestRoutePoint;
 
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    final title = _title;
-    final subtitle = _subtitle;
-    final icon = _icon;
-    final color = _color(colors);
+    
+    double? distanceMeters;
+    if (userLocation != null && nearestRoutePoint != null) {
+      distanceMeters = Geolocator.distanceBetween(
+        userLocation!.latitude,
+        userLocation!.longitude,
+        nearestRoutePoint!.latitude,
+        nearestRoutePoint!.longitude,
+      );
+    }
+    final isOffRoute = distanceMeters != null && distanceMeters > 35;
+    
+    final title = _getTitle(isOffRoute);
+    final subtitle = _getSubtitle(isOffRoute, distanceMeters);
+    final icon = _getIcon(isOffRoute);
+    final color = _getColor(colors, isOffRoute);
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -1037,40 +1292,53 @@ class _PassengerNextStepCard extends StatelessWidget {
     );
   }
 
-  String get _title {
+  String _getTitle(bool isOffRoute) {
     if (locating) return 'نثبت موقعك';
     if (waitSyncError != null) return 'أنت غير ظاهر للسائق';
     if (!waitIsVisible) return 'دا نظهرك للسائق';
+    if (isOffRoute) return 'توجه إلى مسار الخط';
     if (arrival == null) return 'أنت ظاهر، انتظر كية';
     if (trackingIsStale) return 'الكية ظاهرة بس التحديث متأخر';
     if (arrival!.etaMinutes <= 2) return 'جهز، الكية قريبة';
     return 'أنت ظاهر، الكية بالطريق';
   }
 
-  String get _subtitle {
+  String _getSubtitle(bool isOffRoute, double? distanceMeters) {
     if (locating) return 'خلي الموقع مفتوح حتى نحدد أقرب نقطة صعود.';
     if (waitSyncError != null) return waitSyncError!;
     if (!waitIsVisible) return 'نرسل موقع انتظارك للسائقين على هذا الخط.';
+    if (isOffRoute && distanceMeters != null) {
+      final distanceRounded = distanceMeters.round();
+      final vehicleText = arrival == null
+          ? 'ماكو كية قريبة حالياً'
+          : 'والكية ${arrival!.vehicleLabel} راح توصل خلال ${arrival!.etaMinutes} دقيقة تقريباً';
+      return 'امشي روح لهذه النقطة (على بعد $distanceRounded متر) لكي تظهر كراكب، $vehicleText.';
+    }
     final place =
         pickupStop == null ? 'مكانك الحالي' : 'قرب ${pickupStop!.nameAr}';
     if (arrival == null) {
       return 'السائقين يشوفونك عند $place. أول كية تظهر راح نعرضها هنا.';
     }
-    return '${arrival!.vehicleLabel} تبعد ${arrival!.distanceMeters} م وتوصل خلال ${arrival!.etaMinutes} دقيقة تقريباً.';
+    final lastSeen = arrival!.lastSeenSeconds == null
+        ? ''
+        : '، آخر تحديث ${_secondsAgoArabic(arrival!.lastSeenSeconds!)}';
+    return '${arrival!.vehicleLabel} تبعد ${arrival!.distanceMeters} م وتوصل خلال ${arrival!.etaMinutes} دقيقة تقريباً (${arrival!.etaConfidenceLabel}$lastSeen).';
   }
 
-  IconData get _icon {
+  IconData _getIcon(bool isOffRoute) {
     if (locating) return Icons.my_location;
     if (waitSyncError != null) return Icons.visibility_off_outlined;
     if (!waitIsVisible) return Icons.sync_outlined;
+    if (isOffRoute) return Icons.directions_walk;
     if (arrival == null) return Icons.visibility_outlined;
     if (arrival!.etaMinutes <= 2) return Icons.notifications_active_outlined;
     return Icons.directions_bus_filled;
   }
 
-  Color _color(ColorScheme colors) {
+  Color _getColor(ColorScheme colors, bool isOffRoute) {
     if (waitSyncError != null) return colors.error;
     if (locating || !waitIsVisible) return Colors.orange.shade800;
+    if (isOffRoute) return Colors.orange.shade800;
     if (arrival != null && arrival!.etaMinutes <= 2) {
       return Colors.blue.shade700;
     }
@@ -1088,6 +1356,8 @@ class _WaitVisibilityCard extends StatelessWidget {
     required this.locating,
     required this.onRetry,
     required this.onStopWaiting,
+    this.userLocation,
+    this.nearestRoutePoint,
   });
 
   final String? waitStatus;
@@ -1098,39 +1368,61 @@ class _WaitVisibilityCard extends StatelessWidget {
   final bool locating;
   final VoidCallback? onRetry;
   final VoidCallback onStopWaiting;
+  final LatLng? userLocation;
+  final LatLng? nearestRoutePoint;
 
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    final isVisible = waitStatus == 'waiting' && waitSyncError == null;
+    
+    double? distanceMeters;
+    if (userLocation != null && nearestRoutePoint != null) {
+      distanceMeters = Geolocator.distanceBetween(
+        userLocation!.latitude,
+        userLocation!.longitude,
+        nearestRoutePoint!.latitude,
+        nearestRoutePoint!.longitude,
+      );
+    }
+    final isOffRoute = distanceMeters != null && distanceMeters > 35;
+    
+    final isVisible = waitStatus == 'waiting' && waitSyncError == null && !isOffRoute;
     final isBoarded = waitStatus == 'boarded';
     final icon = isBoarded
         ? Icons.check_circle_outline
         : isVisible
             ? Icons.visibility_outlined
-            : waitSyncError != null
+            : isOffRoute
                 ? Icons.visibility_off_outlined
-                : Icons.sync_outlined;
+                : waitSyncError != null
+                    ? Icons.visibility_off_outlined
+                    : Icons.sync_outlined;
     final color = isBoarded
         ? Colors.blue.shade700
         : isVisible
             ? colors.primary
-            : waitSyncError != null
-                ? colors.error
-                : Colors.orange.shade800;
+            : isOffRoute
+                ? Colors.orange.shade800
+                : waitSyncError != null
+                    ? colors.error
+                    : Colors.orange.shade800;
     final title = isBoarded
         ? 'تم إخفاء انتظارك'
         : isVisible
             ? 'أنت ظاهر للسائقين'
-            : waitSyncError != null
-                ? 'انتظارك غير ظاهر حالياً'
-                : 'دا نثبت انتظارك';
+            : isOffRoute
+                ? 'انتظارك غير ظاهر حالياً (خارج الخط)'
+                : waitSyncError != null
+                    ? 'انتظارك غير ظاهر حالياً'
+                    : 'دا نثبت انتظارك';
     final subtitle = isBoarded
         ? 'اعتبرناك صعدت الكية، وما راح تظهر كنقطة انتظار للسائق.'
-        : waitSyncError ??
-            (isVisible
-                ? _visibleMessage
-                : 'نرسل موقع صعودك للسائقين على هذا الخط.');
+        : isOffRoute
+            ? 'أنت على بعد ${distanceMeters.round()} متر من الخط. تقرّب من الشارع العام حتى تظهر للسواق.'
+            : waitSyncError ??
+                (isVisible
+                    ? _visibleMessage
+                    : 'نرسل موقع صعودك للسائقين على هذا الخط.');
 
     return Container(
       padding: const EdgeInsets.all(14),
@@ -1209,6 +1501,8 @@ class _WaitingHeader extends StatelessWidget {
     required this.waitStatus,
     required this.waitIsVisible,
     required this.trackingIsStale,
+    this.userLocation,
+    this.nearestRoutePoint,
   });
 
   final TransitRoute route;
@@ -1219,10 +1513,24 @@ class _WaitingHeader extends StatelessWidget {
   final String? waitStatus;
   final bool waitIsVisible;
   final bool trackingIsStale;
+  final LatLng? userLocation;
+  final LatLng? nearestRoutePoint;
 
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
+    
+    double? distanceMeters;
+    if (userLocation != null && nearestRoutePoint != null) {
+      distanceMeters = Geolocator.distanceBetween(
+        userLocation!.latitude,
+        userLocation!.longitude,
+        nearestRoutePoint!.latitude,
+        nearestRoutePoint!.longitude,
+      );
+    }
+    final isOffRoute = distanceMeters != null && distanceMeters > 35;
+    
     final etaText = locating
         ? '...'
         : hasLocationError
@@ -1232,22 +1540,24 @@ class _WaitingHeader extends StatelessWidget {
                 : '${arrival!.etaMinutes}';
     final etaLabel = waitStatus == 'boarded'
         ? 'اعتبرناك صعدت، شلنا نقطة انتظارك من السائق'
-        : waitIsVisible
-            ? 'أنت ظاهر للسائقين على هذا الخط'
-            : trackingIsStale
-                ? 'التتبع متأخر، الوقت تقريبي'
-                : locating
-                    ? 'دا نحدد موقعك'
-                    : hasLocationError
-                        ? 'الموقع يحتاج تحديث'
-                        : arrival == null
-                            ? 'بانتظار ظهور كية'
-                            : 'دقيقة وتوصل لمكانك';
+        : isOffRoute
+            ? 'أنت غير ظاهر للسواق حالياً (ابتعدت عن الخط)'
+            : waitIsVisible
+                ? 'أنت ظاهر للسائقين على هذا الخط'
+                : trackingIsStale
+                    ? 'التتبع متأخر، الوقت تقريبي'
+                    : locating
+                        ? 'دا نحدد موقعك'
+                        : hasLocationError
+                            ? 'الموقع يحتاج تحديث'
+                            : arrival == null
+                                ? 'بانتظار ظهور كية'
+                                : 'دقيقة وتوصل لمكانك';
 
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: colors.primary,
+        color: isOffRoute ? Colors.orange.shade800 : colors.primary,
         borderRadius: BorderRadius.circular(8),
       ),
       child: Column(
@@ -1329,6 +1639,13 @@ String _relativeArabic(DateTime dateTime) {
   if (difference.inSeconds < 45) return 'ثواني';
   if (difference.inMinutes < 60) return '${difference.inMinutes} دقيقة';
   return '${difference.inHours} ساعة';
+}
+
+String _secondsAgoArabic(int seconds) {
+  if (seconds < 45) return 'قبل ثواني';
+  final minutes = (seconds / 60).round();
+  if (minutes < 60) return 'قبل $minutes دقيقة';
+  return 'قبل ${(minutes / 60).round()} ساعة';
 }
 
 class _StatusLine extends StatelessWidget {

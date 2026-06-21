@@ -13,6 +13,7 @@ import {
   AuthenticatedOperatorRequest,
   OperatorAuthGuard,
 } from "../auth/operator-auth.guard";
+import { PassengerWaitRateLimiterGuard } from "../common/guards/rate-limiter.guard";
 import {
   CreateDriverVehicleDto,
   RouteArrivalQueryDto,
@@ -81,6 +82,7 @@ export class TrackingController {
   }
 
   @Post("routes/:routeId/passenger-waits")
+  @UseGuards(PassengerWaitRateLimiterGuard)
   startPassengerWait(
     @Param("routeId") routeId: string,
     @Body() dto: StartPassengerWaitDto,
@@ -89,6 +91,7 @@ export class TrackingController {
   }
 
   @Post("passenger-waits/:waitId/location")
+  @UseGuards(PassengerWaitRateLimiterGuard)
   updatePassengerWait(
     @Param("waitId") waitId: string,
     @Body() dto: UpdatePassengerWaitDto,
@@ -97,12 +100,37 @@ export class TrackingController {
   }
 
   @Post("passenger-waits/:waitId/cancel")
+  @UseGuards(PassengerWaitRateLimiterGuard)
   cancelPassengerWait(@Param("waitId") waitId: string) {
     return this.tracking.cancelPassengerWait(waitId);
   }
 
+  @Post("passenger-waits/:waitId/board")
+  @UseGuards(PassengerWaitRateLimiterGuard)
+  boardPassengerWait(@Param("waitId") waitId: string) {
+    return this.tracking.boardPassengerWait(waitId);
+  }
+
   @Get("routes/:routeId/passenger-waits/active")
+  @UseGuards(OperatorAuthGuard)
+  @ApiBearerAuth()
   activePassengerWaits(@Param("routeId") routeId: string) {
     return this.tracking.getActivePassengerWaits(routeId);
   }
+
+  @Get("walking-route")
+  walkingRoute(
+    @Query("fromLat") fromLat: string,
+    @Query("fromLng") fromLng: string,
+    @Query("toLat") toLat: string,
+    @Query("toLng") toLng: string,
+  ) {
+    return this.tracking.getWalkingRoute(
+      parseFloat(fromLat),
+      parseFloat(fromLng),
+      parseFloat(toLat),
+      parseFloat(toLng),
+    );
+  }
 }
+

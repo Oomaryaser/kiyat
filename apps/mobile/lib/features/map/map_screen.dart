@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/utils/location_helper.dart';
+
 import '../../shared/data/transit_repository.dart';
 import '../../shared/models/transit_models.dart';
 import '../../shared/widgets/live_route_map.dart';
@@ -114,7 +116,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
         return;
       }
 
-      final position = await Geolocator.getCurrentPosition(
+      final position = await KiyatLocation.getCurrentPosition(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.medium,
           timeLimit: Duration(seconds: 5),

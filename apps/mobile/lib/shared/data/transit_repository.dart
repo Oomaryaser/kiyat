@@ -149,18 +149,53 @@ class TransitRepository {
     }
   }
 
+  Future<PassengerWaitSession?> boardPassengerWait(String waitId) async {
+    try {
+      final response = await _dio.post<Map<String, dynamic>>(
+        '/tracking/passenger-waits/$waitId/board',
+      );
+      return PassengerWaitSession.fromJson(response.data ?? const {});
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<bool> submitReport({
     required String routeId,
     required String reportType,
     required String description,
   }) async {
     try {
-      final reporterId = await _anonymousSessionId();
       await _dio.post<Map<String, dynamic>>('/reports', data: {
         'routeId': routeId,
-        'reporterId': reporterId,
         'reportType': reportType,
         'description': description,
+      });
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> submitTripRating({
+    required String routeId,
+    String? passengerWaitId,
+    required int rating,
+    String? crowdingLevel,
+    bool? priceFair,
+    int? cleanlinessRating,
+    String? comment,
+  }) async {
+    try {
+      await _dio.post<Map<String, dynamic>>('/trip-ratings', data: {
+        'routeId': routeId,
+        if (passengerWaitId != null) 'passengerWaitId': passengerWaitId,
+        'rating': rating,
+        if (crowdingLevel != null) 'crowdingLevel': crowdingLevel,
+        if (priceFair != null) 'priceFair': priceFair,
+        if (cleanlinessRating != null) 'cleanlinessRating': cleanlinessRating,
+        if (comment != null && comment.trim().isNotEmpty)
+          'comment': comment.trim(),
       });
       return true;
     } catch (_) {

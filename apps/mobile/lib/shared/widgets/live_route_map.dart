@@ -4,10 +4,17 @@ import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:http/http.dart' as http;
 
 import '../models/transit_models.dart';
+
+/// Base URL for the Kiyat backend API.
+const _apiBase = String.fromEnvironment(
+  'API_URL',
+  defaultValue: 'http://localhost:3000',
+);
 
 class LiveRouteMap extends StatefulWidget {
   const LiveRouteMap({
@@ -18,6 +25,8 @@ class LiveRouteMap extends StatefulWidget {
     required this.selectedVehicle,
     this.compact = false,
     this.extraRouteLines = const [],
+    this.userLocation,
+    this.nearestRoutePoint,
   });
 
   final List<TransitStop> stops;
@@ -26,6 +35,8 @@ class LiveRouteMap extends StatefulWidget {
   final VehicleArrivalEstimate? selectedVehicle;
   final bool compact;
   final List<List<TransitStop>> extraRouteLines;
+  final LatLng? userLocation;
+  final LatLng? nearestRoutePoint;
 
   @override
   State<LiveRouteMap> createState() => _LiveRouteMapState();
@@ -33,8 +44,6 @@ class LiveRouteMap extends StatefulWidget {
 
 class _LiveRouteMapState extends State<LiveRouteMap>
     with SingleTickerProviderStateMixin {
-  static const _directionsApiKey =
-      String.fromEnvironment('GOOGLE_MAPS_API_KEY');
   static const _cleanMapStyle = '''
 [
   {
@@ -64,12 +73,28 @@ class _LiveRouteMapState extends State<LiveRouteMap>
   BitmapDescriptor? _vehicleIcon;
   BitmapDescriptor? _passedVehicleIcon;
 
+  // ── Walking route state ───────────────────────────────────────────────────
+  List<LatLng> _walkingRoute = const [];
+  LatLng? _lastFetchLocation;
+  LatLng? _lastFetchNearestRoutePoint;
+  DateTime? _lastFetchTime;
+  bool _walkingRouteFetching = false;
+  int? _walkingMinutes;
+  int? _walkingDistanceMeters;
+
+  // ── Camera auto-tracking state ────────────────────────────────────────────
+  /// When false the user has manually dragged the map; auto-pan is suspended.
+  bool _autoCameraEnabled = true;
+
   @override
   void initState() {
     super.initState();
     _ensurePulseController();
     _loadMarkerIcons();
     _loadGoogleRoute();
+    if (widget.userLocation != null && widget.nearestRoutePoint != null) {
+      _loadWalkingRoute();
+    }
   }
 
   @override
@@ -85,6 +110,33 @@ class _LiveRouteMapState extends State<LiveRouteMap>
         oldWidget.pickupStop != widget.pickupStop) {
       _loadGoogleRoute();
     }
+    // Throttled walking route re-fetch.
+    final user = widget.userLocation;
+    final target = widget.nearestRoutePoint;
+    if (user != null && target != null) {
+      final movedEnough = _lastFetchLocation == null ||
+          Geolocator.distanceBetween(
+                user.latitude,
+                user.longitude,
+                _lastFetchLocation!.latitude,
+                _lastFetchLocation!.longitude,
+              ) >
+              20;
+      final targetShifted = _lastFetchNearestRoutePoint == null ||
+          Geolocator.distanceBetween(
+                target.latitude,
+                target.longitude,
+                _lastFetchNearestRoutePoint!.latitude,
+                _lastFetchNearestRoutePoint!.longitude,
+              ) >
+              5;
+      final stale = _lastFetchTime == null ||
+          DateTime.now().difference(_lastFetchTime!) >
+              const Duration(seconds: 15);
+      if (movedEnough || targetShifted || stale) {
+        _loadWalkingRoute();
+      }
+    }
   }
 
   @override
@@ -97,61 +149,115 @@ class _LiveRouteMapState extends State<LiveRouteMap>
         : _roadRoute;
     final pulseController = _ensurePulseController();
 
+    // Walking polyline: use real road route if available, else straight line.
+    final walkingPolyline = _walkingRoute.isNotEmpty
+        ? _walkingRoute
+        : (widget.userLocation != null && widget.nearestRoutePoint != null
+            ? [widget.userLocation!, widget.nearestRoutePoint!]
+            : <LatLng>[]);
+
+    final showWalkingPath = walkingPolyline.length >= 2;
+    final showRecenterButton =
+        !_autoCameraEnabled && widget.userLocation != null && widget.nearestRoutePoint != null;
+
     return AnimatedBuilder(
       animation: pulseController,
       builder: (context, _) => ClipRRect(
         borderRadius: BorderRadius.circular(widget.compact ? 8 : 0),
-        child: GoogleMap(
-          initialCameraPosition: CameraPosition(
-              target: center, zoom: widget.compact ? 14.6 : 13.4),
-          onMapCreated: (controller) {
-            _controller = controller;
-            _fitCamera(routePoints);
-          },
-          style: _cleanMapStyle,
-          mapType: MapType.normal,
-          compassEnabled: !widget.compact,
-          myLocationButtonEnabled: false,
-          zoomControlsEnabled: false,
-          zoomGesturesEnabled: true,
-          scrollGesturesEnabled: true,
-          rotateGesturesEnabled: true,
-          tiltGesturesEnabled: true,
-          mapToolbarEnabled: false,
-          gestureRecognizers: {
-            Factory<OneSequenceGestureRecognizer>(
-              EagerGestureRecognizer.new,
+        child: Stack(
+          children: [
+            // ── Detect user drag to pause auto-camera ──────────────────────
+            Listener(
+              onPointerDown: (_) {
+                if (_autoCameraEnabled) {
+                  setState(() => _autoCameraEnabled = false);
+                }
+              },
+              child: GoogleMap(
+                initialCameraPosition: CameraPosition(
+                    target: center, zoom: widget.compact ? 14.6 : 13.4),
+                onMapCreated: (controller) {
+                  _controller = controller;
+                  _animateCameraToWalkingOrFit(routePoints);
+                },
+                style: _cleanMapStyle,
+                mapType: MapType.normal,
+                compassEnabled: !widget.compact,
+                myLocationButtonEnabled: false,
+                zoomControlsEnabled: false,
+                zoomGesturesEnabled: true,
+                scrollGesturesEnabled: true,
+                rotateGesturesEnabled: true,
+                tiltGesturesEnabled: true,
+                mapToolbarEnabled: false,
+                gestureRecognizers: {
+                  Factory<OneSequenceGestureRecognizer>(
+                    EagerGestureRecognizer.new,
+                  ),
+                },
+                markers: _markers,
+                circles: _pulseCircles,
+                polylines: {
+                  for (var i = 0; i < widget.extraRouteLines.length; i += 1)
+                    if (widget.extraRouteLines[i].length > 1)
+                      Polyline(
+                        polylineId: PolylineId('other_route_$i'),
+                        points: widget.extraRouteLines[i]
+                            .map((stop) => LatLng(stop.lat, stop.lng))
+                            .toList(),
+                        color: const Color(0xFF455A64).withValues(alpha: 0.32),
+                        width: widget.compact ? 3 : 4,
+                        zIndex: 0,
+                      ),
+                  Polyline(
+                    polylineId: const PolylineId('kiyat_route_shadow'),
+                    points: routePoints,
+                    color: Colors.white,
+                    width: widget.compact ? 8 : 10,
+                    zIndex: 1,
+                  ),
+                  Polyline(
+                    polylineId: const PolylineId('kiyat_route'),
+                    points: routePoints,
+                    color: const Color(0xFF1B5E8B),
+                    width: widget.compact ? 5 : 6,
+                    zIndex: 2,
+                  ),
+                  if (showWalkingPath)
+                    Polyline(
+                      polylineId: const PolylineId('walking_to_route'),
+                      points: walkingPolyline,
+                      color: Colors.green.shade600,
+                      width: 4,
+                      patterns: [PatternItem.dash(12), PatternItem.gap(8)],
+                      zIndex: 3,
+                    ),
+                },
+              ),
             ),
-          },
-          markers: _markers,
-          circles: _pulseCircles,
-          polylines: {
-            for (var i = 0; i < widget.extraRouteLines.length; i += 1)
-              if (widget.extraRouteLines[i].length > 1)
-                Polyline(
-                  polylineId: PolylineId('other_route_$i'),
-                  points: widget.extraRouteLines[i]
-                      .map((stop) => LatLng(stop.lat, stop.lng))
-                      .toList(),
-                  color: const Color(0xFF455A64).withValues(alpha: 0.32),
-                  width: widget.compact ? 3 : 4,
-                  zIndex: 0,
+
+            // ── Re-center floating button ─────────────────────────────────
+            if (showRecenterButton)
+              Positioned(
+                bottom: 16,
+                left: 16,
+                child: _RecenterButton(
+                  onTap: () {
+                    setState(() => _autoCameraEnabled = true);
+                    _animateCameraToWalkingOrFit(routePoints);
+                  },
                 ),
-            Polyline(
-              polylineId: const PolylineId('kiyat_route_shadow'),
-              points: routePoints,
-              color: Colors.white,
-              width: widget.compact ? 8 : 10,
-              zIndex: 1,
-            ),
-            Polyline(
-              polylineId: const PolylineId('kiyat_route'),
-              points: routePoints,
-              color: const Color(0xFF1B5E8B),
-              width: widget.compact ? 5 : 6,
-              zIndex: 2,
-            ),
-          },
+              ),
+            if (showWalkingPath && (_walkingMinutes != null || _walkingDistanceMeters != null))
+              Positioned(
+                top: 12,
+                right: 12,
+                child: _WalkingEtaBadge(
+                  minutes: _walkingMinutes,
+                  distanceMeters: _walkingDistanceMeters,
+                ),
+              ),
+          ],
         ),
       ),
     );
@@ -181,15 +287,29 @@ class _LiveRouteMapState extends State<LiveRouteMap>
       );
     }
 
+    if (widget.userLocation != null) {
+      markers.add(
+        Marker(
+          markerId: const MarkerId('user_actual_location'),
+          position: widget.userLocation!,
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+          anchor: const Offset(0.5, 0.5),
+          infoWindow: const InfoWindow(title: 'موقعك الفعلي'),
+          zIndexInt: 11,
+        ),
+      );
+    }
+
     if (widget.pickupStop != null && pickupIcon != null) {
+      final pickupPosition = widget.nearestRoutePoint ?? LatLng(widget.pickupStop!.lat, widget.pickupStop!.lng);
       markers.add(
         Marker(
           markerId: const MarkerId('pickup_location'),
-          position: LatLng(widget.pickupStop!.lat, widget.pickupStop!.lng),
+          position: pickupPosition,
           icon: pickupIcon,
           anchor: const Offset(0.5, 0.5),
           infoWindow: const InfoWindow(
-              title: 'موقعك الحالي', snippet: 'نقطة الصعود على مسار الخط'),
+              title: 'نقطة الصعود', snippet: 'نقطة صعودك للخط'),
           zIndexInt: 10,
         ),
       );
@@ -298,6 +418,7 @@ class _LiveRouteMapState extends State<LiveRouteMap>
     final fallback =
         widget.stops.map((stop) => LatLng(stop.lat, stop.lng)).toList();
     if (widget.stops.length < 2) {
+      if (!mounted) return;
       setState(() => _roadRoute = fallback);
       return;
     }
@@ -329,6 +450,7 @@ class _LiveRouteMapState extends State<LiveRouteMap>
             )
             .toList();
         if (points.length > 1) {
+          if (!mounted) return;
           setState(() => _roadRoute = points);
           await _fitCamera(points);
           return;
@@ -339,7 +461,8 @@ class _LiveRouteMapState extends State<LiveRouteMap>
     }
 
     // Fallback to Google Directions if API Key is available
-    if (_directionsApiKey.isNotEmpty) {
+    const googleMapsKey = String.fromEnvironment('GOOGLE_MAPS_API_KEY');
+    if (googleMapsKey.isNotEmpty) {
       final origin = widget.stops.first;
       final destination = widget.stops.last;
       final waypoints = widget.stops.length > 2
@@ -352,7 +475,7 @@ class _LiveRouteMapState extends State<LiveRouteMap>
         'origin': '${origin.lat},${origin.lng}',
         'destination': '${destination.lat},${destination.lng}',
         'mode': 'driving',
-        'key': _directionsApiKey,
+        'key': googleMapsKey,
         if (waypoints != null) 'waypoints': waypoints,
       };
       final uri =
@@ -368,6 +491,7 @@ class _LiveRouteMapState extends State<LiveRouteMap>
           if (encoded != null && encoded.isNotEmpty) {
             final decoded = _decodePolyline(encoded);
             if (decoded.isNotEmpty) {
+              if (!mounted) return;
               setState(() => _roadRoute = decoded);
               await _fitCamera(decoded);
               return;
@@ -378,22 +502,107 @@ class _LiveRouteMapState extends State<LiveRouteMap>
     }
 
     // Ultimate fallback: straight lines connecting stops
+    if (!mounted) return;
     setState(() => _roadRoute = fallback);
     await _fitCamera(fallback);
   }
 
-  Future<void> _fitCamera(List<LatLng> routePoints) async {
+  /// Choose camera target: walking path (when off-route) or full transit route.
+  Future<void> _animateCameraToWalkingOrFit(List<LatLng> routePoints) async {
+    if (!_autoCameraEnabled) return;
     final controller = _controller;
-    if (controller == null || routePoints.length < 2) return;
+    if (controller == null) return;
 
+    final user = widget.userLocation;
+    final target = widget.nearestRoutePoint;
+
+    // When the passenger is still walking to the route, focus on walking path.
+    if (user != null && target != null) {
+      final distToRoute = Geolocator.distanceBetween(
+        user.latitude, user.longitude,
+        target.latitude, target.longitude,
+      );
+      if (distToRoute > 10) {
+        final path = _walkingRoute.isNotEmpty
+            ? _walkingRoute
+            : [user, target];
+        if (path.length >= 2) {
+          await controller.animateCamera(
+            CameraUpdate.newLatLngBounds(_boundsFor(path), 60),
+          );
+          return;
+        }
+      }
+    }
+
+    // Default: fit the full transit route + vehicles.
+    if (routePoints.length < 2) return;
     final points = [
       ...routePoints,
       if (widget.pickupStop != null)
         LatLng(widget.pickupStop!.lat, widget.pickupStop!.lng),
       ...widget.vehicles.map((vehicle) => LatLng(vehicle.lat, vehicle.lng)),
     ];
-    await controller.animateCamera(CameraUpdate.newLatLngBounds(
-        _boundsFor(points), widget.compact ? 24 : 56));
+    await controller.animateCamera(
+      CameraUpdate.newLatLngBounds(_boundsFor(points), widget.compact ? 24 : 56),
+    );
+  }
+
+  /// Legacy alias kept for OSRM/Google route load callbacks.
+  Future<void> _fitCamera(List<LatLng> routePoints) =>
+      _animateCameraToWalkingOrFit(routePoints);
+
+  // ── Walking route from backend ──────────────────────────────────────────────
+
+  Future<void> _loadWalkingRoute() async {
+    final user = widget.userLocation;
+    final target = widget.nearestRoutePoint;
+    if (user == null || target == null || _walkingRouteFetching) return;
+
+    _walkingRouteFetching = true;
+    _lastFetchLocation = user;
+    _lastFetchNearestRoutePoint = target;
+    _lastFetchTime = DateTime.now();
+
+    try {
+      final uri = Uri.parse(
+        '$_apiBase/tracking/walking-route'
+        '?fromLat=${user.latitude}'
+        '&fromLng=${user.longitude}'
+        '&toLat=${target.latitude}'
+        '&toLng=${target.longitude}',
+      );
+      final response = await http.get(uri).timeout(const Duration(seconds: 8));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        final rawPoints = data['points'] as List<dynamic>? ?? const [];
+        final points = rawPoints
+            .whereType<Map<String, dynamic>>()
+            .map((p) => LatLng(
+                  (p['lat'] as num).toDouble(),
+                  (p['lng'] as num).toDouble(),
+                ))
+            .toList();
+        if (points.length > 1 && mounted) {
+          setState(() {
+            _walkingRoute = points;
+            _walkingMinutes = (data['walkingMinutes'] as num?)?.toInt();
+            _walkingDistanceMeters = (data['distanceMeters'] as num?)?.toInt();
+          });
+          // Focus camera on the real walking path.
+          final routePoints = _roadRoute.isEmpty
+              ? widget.stops.map((s) => LatLng(s.lat, s.lng)).toList()
+              : _roadRoute;
+          await _animateCameraToWalkingOrFit(routePoints);
+        }
+      }
+    } catch (_) {
+      // Silently keep the current (possibly straight-line) fallback.
+    } finally {
+      if (mounted) {
+        _walkingRouteFetching = false;
+      }
+    }
   }
 
   LatLngBounds _boundsFor(List<LatLng> points) {
@@ -580,5 +789,106 @@ class _LiveRouteMapState extends State<LiveRouteMap>
     final image = await picture.toImage(width, height);
     final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
     return byteData!.buffer.asUint8List();
+  }
+}
+
+// ── Re-center Button ──────────────────────────────────────────────────────────
+
+/// A premium floating button that re-enables auto camera tracking.
+class _RecenterButton extends StatelessWidget {
+  const _RecenterButton({required this.onTap});
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1B5E8B),
+          borderRadius: BorderRadius.circular(30),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFF1B5E8B).withValues(alpha: 0.38),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.my_location_rounded, color: Colors.white, size: 17),
+            SizedBox(width: 6),
+            Text(
+              'توسيط المسار',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                fontFamily: 'Tajawal',
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _WalkingEtaBadge extends StatelessWidget {
+  const _WalkingEtaBadge({
+    required this.minutes,
+    required this.distanceMeters,
+  });
+
+  final int? minutes;
+  final int? distanceMeters;
+
+  @override
+  Widget build(BuildContext context) {
+    final distanceText = distanceMeters == null
+        ? null
+        : distanceMeters! >= 1000
+            ? '${(distanceMeters! / 1000).toStringAsFixed(1)} كم'
+            : '$distanceMeters م';
+    final text = [
+      if (minutes != null) '$minutes دقيقة مشياً',
+      if (distanceText != null) distanceText,
+    ].join(' • ');
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.14),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.directions_walk, size: 17, color: Colors.green.shade700),
+            const SizedBox(width: 6),
+            Text(
+              text,
+              style: const TextStyle(
+                color: Color(0xFF173244),
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+                fontFamily: 'Tajawal',
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }

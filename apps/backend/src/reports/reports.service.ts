@@ -9,8 +9,8 @@ import { CreateReportDto, ListReportsDto, ReviewReportDto } from './reports.dto'
 export class ReportsService {
   constructor(@InjectRepository(CommunityReport) private readonly reports: Repository<CommunityReport>) {}
 
-  create(dto: CreateReportDto) {
-    return this.reports.save(this.reports.create(dto));
+  create(dto: CreateReportDto, reporterId: string) {
+    return this.reports.save(this.reports.create({ ...dto, reporterId }));
   }
 
   async list(query: ListReportsDto): Promise<PaginatedResponse<CommunityReport>> {

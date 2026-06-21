@@ -6,13 +6,15 @@ import {
   SubscribeMessage,
   WebSocketGateway,
   WebSocketServer,
+  OnGatewayConnection,
 } from '@nestjs/websockets';
+import { JwtService } from '@nestjs/jwt';
 import Redis from 'ioredis';
 import { Server, Socket } from 'socket.io';
 import { TrackingService, VehicleLocationPayload } from './tracking.service';
 
 @WebSocketGateway({ cors: true, namespace: 'tracking' })
-export class TrackingGateway {
+export class TrackingGateway implements OnGatewayConnection {
   @WebSocketServer()
   server!: Server;
 
@@ -21,9 +23,30 @@ export class TrackingGateway {
 
   constructor(
     private readonly tracking: TrackingService,
-    config: ConfigService,
+    private readonly jwt: JwtService,
+    private readonly config: ConfigService,
   ) {
-    this.redis = new Redis(config.get<string>('REDIS_URL', 'redis://localhost:6379'));
+    this.redis = new Redis(this.config.get<string>('REDIS_URL', 'redis://localhost:6379'));
+  }
+
+  async handleConnection(client: Socket) {
+    try {
+      const authHeader = client.handshake.auth?.token || client.handshake.headers?.authorization;
+      const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : authHeader;
+      if (!token) {
+        this.logger.warn(`Disconnecting socket client: Missing auth token`);
+        client.disconnect();
+        return;
+      }
+      const payload = await this.jwt.verifyAsync(token, {
+        secret: this.config.getOrThrow<string>('JWT_SECRET'),
+      });
+      client.data.user = payload;
+      this.logger.log(`Socket client connected and authenticated: ${payload.phone}`);
+    } catch (err: any) {
+      this.logger.warn(`Disconnecting socket client: Invalid token (${err.message})`);
+      client.disconnect();
+    }
   }
 
   @SubscribeMessage('vehicle:subscribe')

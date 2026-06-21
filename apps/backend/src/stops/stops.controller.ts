@@ -1,8 +1,9 @@
-import { Body, Controller, Get, Post, Query } from '@nestjs/common';
-import { ApiTags } from '@nestjs/swagger';
+import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { PaginationQueryDto } from '../common/dto/pagination.dto';
 import { CreateStopDto, NearbyStopsDto } from './stops.dto';
 import { StopsService } from './stops.service';
+import { OperatorAuthGuard } from '../auth/operator-auth.guard';
 
 @ApiTags('stops')
 @Controller('stops')
@@ -20,6 +21,8 @@ export class StopsController {
   }
 
   @Post()
+  @UseGuards(OperatorAuthGuard)
+  @ApiBearerAuth()
   create(@Body() dto: CreateStopDto) {
     return this.stops.create(dto);
   }

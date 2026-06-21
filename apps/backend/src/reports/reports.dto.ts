@@ -6,8 +6,9 @@ export class CreateReportDto {
   @IsUUID()
   routeId!: string;
 
+  @IsOptional()
   @IsUUID()
-  reporterId!: string;
+  reporterId?: string;
 
   @IsEnum(ReportType)
   reportType!: ReportType;

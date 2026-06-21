@@ -5,9 +5,10 @@ import { RouteStop } from './route-stop.entity';
 import { TransitRoute } from './route.entity';
 import { RoutesController } from './routes.controller';
 import { RoutesService } from './routes.service';
+import { AuthModule } from '../auth/auth.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([TransitRoute, Stop, RouteStop])],
+  imports: [TypeOrmModule.forFeature([TransitRoute, Stop, RouteStop]), AuthModule],
   controllers: [RoutesController],
   providers: [RoutesService],
   exports: [RoutesService, TypeOrmModule],

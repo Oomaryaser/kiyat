@@ -9,8 +9,8 @@ final apiClientProvider = Provider<Dio>((ref) {
         'API_URL',
         defaultValue: 'http://localhost:3000',
       ),
-      connectTimeout: const Duration(seconds: 2),
-      receiveTimeout: const Duration(seconds: 4),
+      connectTimeout: const Duration(seconds: 10),
+      receiveTimeout: const Duration(seconds: 30),
     ),
   );
   dio.interceptors.add(

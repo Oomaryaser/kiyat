@@ -190,7 +190,6 @@ class _SettingsSection extends StatelessWidget {
   Widget build(BuildContext context) {
     return Material(
       color: Theme.of(context).cardTheme.color,
-      borderRadius: BorderRadius.circular(14),
       clipBehavior: Clip.antiAlias,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
