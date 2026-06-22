@@ -7,6 +7,7 @@ import {
   Query,
   Req,
   UseGuards,
+  Headers,
 } from "@nestjs/common";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import {
@@ -95,20 +96,27 @@ export class TrackingController {
   updatePassengerWait(
     @Param("waitId") waitId: string,
     @Body() dto: UpdatePassengerWaitDto,
+    @Headers("x-anonymous-session-id") anonymousSessionId?: string,
   ) {
-    return this.tracking.updatePassengerWaitLocation(waitId, dto);
+    return this.tracking.updatePassengerWaitLocation(waitId, dto, anonymousSessionId);
   }
 
   @Post("passenger-waits/:waitId/cancel")
   @UseGuards(PassengerWaitRateLimiterGuard)
-  cancelPassengerWait(@Param("waitId") waitId: string) {
-    return this.tracking.cancelPassengerWait(waitId);
+  cancelPassengerWait(
+    @Param("waitId") waitId: string,
+    @Headers("x-anonymous-session-id") anonymousSessionId?: string,
+  ) {
+    return this.tracking.cancelPassengerWait(waitId, anonymousSessionId);
   }
 
   @Post("passenger-waits/:waitId/board")
   @UseGuards(PassengerWaitRateLimiterGuard)
-  boardPassengerWait(@Param("waitId") waitId: string) {
-    return this.tracking.boardPassengerWait(waitId);
+  boardPassengerWait(
+    @Param("waitId") waitId: string,
+    @Headers("x-anonymous-session-id") anonymousSessionId?: string,
+  ) {
+    return this.tracking.boardPassengerWait(waitId, anonymousSessionId);
   }
 
   @Get("routes/:routeId/passenger-waits/active")

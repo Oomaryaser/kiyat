@@ -29,10 +29,6 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
   bool locating = true;
   String? locationError;
   _LocationIssue? locationIssue;
-  String? waitSessionId;
-  String? waitStatus;
-  DateTime? waitLastSyncedAt;
-  String? waitSyncError;
   double? pickupLat;
   double? pickupLng;
   double? userLat;
@@ -42,11 +38,8 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
   String? lastSelectedVehicleLabel;
   String? persistedRouteId;
   bool arrivalNoticeShown = false;
-  bool ratingPromptShown = false;
   RouteArrivalSnapshot? _lastArrivalSnapshot;
-  StreamSubscription<Position>? _positionSubscription;
   Timer? _arrivalRefreshTimer;
-  Timer? _waitHeartbeatTimer;
 
   @override
   void initState() {
@@ -55,9 +48,7 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
 
   @override
   void dispose() {
-    _positionSubscription?.cancel();
     _arrivalRefreshTimer?.cancel();
-    _waitHeartbeatTimer?.cancel();
     super.dispose();
   }
 
@@ -67,30 +58,66 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
     return detailAsync.when(
       data: (detail) => _buildDetail(context, detail),
       loading: () => Scaffold(
-        appBar: AppBar(title: const Text('انتظار الخط')),
+        appBar: AppBar(title: const Text('تفاصيل الخط')),
         body: const Center(child: CircularProgressIndicator()),
       ),
-      error: (_, __) => _buildDetail(
-        context,
-        const TransitRouteDetail(route: sampleRoute, stops: sampleStops),
+      error: (error, stack) => Scaffold(
+        appBar: AppBar(title: const Text('تفاصيل الخط')),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.wifi_off_rounded, size: 64, color: Colors.grey[400]),
+                const SizedBox(height: 16),
+                const Text(
+                  'حدث خطأ في تحميل تفاصيل الخط',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, fontFamily: 'Tajawal'),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  error.toString().contains('SocketException') || error.toString().contains('Network')
+                      ? 'يرجى التحقق من اتصالك بالإنترنت والمحاولة مجدداً.'
+                      : 'فشل الاتصال بالخادم. يرجى المحاولة لاحقاً.',
+                  style: TextStyle(color: Colors.grey[600], fontFamily: 'Tajawal'),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 24),
+                ElevatedButton.icon(
+                  onPressed: () => ref.invalidate(routeDetailProvider(widget.routeId)),
+                  icon: const Icon(Icons.refresh_rounded),
+                  label: const Text('إعادة المحاولة', style: TextStyle(fontFamily: 'Tajawal')),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
 
   Widget _buildDetail(BuildContext context, TransitRouteDetail detail) {
+    final colors = Theme.of(context).colorScheme;
     final route = detail.route;
     final saved = ref.watch(savedRouteIdsProvider).maybeWhen(
           data: (ids) => ids.contains(route.id),
           orElse: () => false,
         );
-    final stops = detail.stops.isEmpty ? sampleStops : detail.stops;
+    final savedActiveRouteId = ref.watch(activeWaitRouteIdProvider).maybeWhen(
+          data: (routeId) => routeId,
+          orElse: () => null,
+        );
+    final isWaitingForThisRoute = savedActiveRouteId == route.id;
+    final stops = detail.stops;
     if (persistedRouteId != route.id) {
       persistedRouteId = route.id;
     }
     if (!autoLocateRequested) {
       autoLocateRequested = true;
       WidgetsBinding.instance
-          .addPostFrameCallback((_) => _useCurrentLocation(stops, route.id));
+          .addPostFrameCallback((_) => _useCurrentLocation(stops, route.id, isWaitingForThisRoute));
     }
     final pickupStop = _pickupStop(stops);
     final effectivePickupLat = pickupLat ?? pickupStop?.lat;
@@ -124,24 +151,31 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
       arrival,
       alertsEnabled,
     );
-    final nearbyVehicles = effectiveSnapshot?.vehicles ?? sampleVehicles;
-    final skippedCount = effectiveSnapshot?.skippedPassedVehicles.length ??
-        sampleVehicles.where((vehicle) => vehicle.hasPassedPickup).length;
+    final nearbyVehicles = effectiveSnapshot?.vehicles ?? const [];
+    final skippedCount = effectiveSnapshot?.skippedPassedVehicles.length ?? 0;
     final trackingIsStale = _trackingIsStale(arrival);
-
-    final savedActiveRouteId = ref.watch(activeWaitRouteIdProvider).maybeWhen(
-          data: (routeId) => routeId,
-          orElse: () => null,
-        );
-    final isWaitingForThisRoute = savedActiveRouteId == route.id;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('تفاصيل الخط'),
+        title: const Text(
+          'تفاصيل الخط',
+          style: TextStyle(
+            fontWeight: FontWeight.w900,
+            fontFamily: 'Tajawal',
+            fontSize: 20,
+          ),
+        ),
+        centerTitle: true,
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        scrolledUnderElevation: 0,
         actions: [
           IconButton(
             onPressed: () => _toggleSaved(route.id, !saved),
-            icon: Icon(saved ? Icons.bookmark : Icons.bookmark_border),
+            icon: Icon(
+              saved ? Icons.bookmark_rounded : Icons.bookmark_border_rounded,
+              color: saved ? colors.primary : colors.onSurface,
+            ),
             tooltip: saved ? 'محفوظ' : 'حفظ الخط',
           ),
         ],
@@ -155,7 +189,21 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
                 child: FilledButton.icon(
                   onPressed: () => context.push('/map'),
                   icon: const Icon(Icons.map_outlined),
-                  label: const Text('الخريطة الحية'),
+                  style: FilledButton.styleFrom(
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(22),
+                    ),
+                    backgroundColor: colors.primary.withValues(alpha: 0.1),
+                    foregroundColor: colors.primary,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                  label: const Text(
+                    'الخريطة الحية',
+                    style: TextStyle(
+                      fontFamily: 'Tajawal',
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
                 ),
               ),
               const SizedBox(width: 10),
@@ -165,10 +213,23 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
                     onPressed: _stopWaiting,
                     icon: const Icon(Icons.stop_circle_outlined),
                     style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.red.shade700,
-                      side: BorderSide(color: Colors.red.shade200),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(22),
+                      ),
+                      foregroundColor: const Color(0xFFB42318),
+                      side: BorderSide(
+                        color: const Color(0xFFB42318).withValues(alpha: 0.18),
+                      ),
+                      backgroundColor: const Color(0xFFFFF1F0).withValues(alpha: 0.72),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
                     ),
-                    label: const Text('إيقاف الانتظار'),
+                    label: const Text(
+                      'إيقاف الانتظار',
+                      style: TextStyle(
+                        fontFamily: 'Tajawal',
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
                   ),
                 )
               else
@@ -178,46 +239,71 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
                         ? null
                         : () => _startPassengerWait(route.id, effectivePickupLat, effectivePickupLng),
                     icon: const Icon(Icons.play_circle_fill_outlined),
-                    label: const Text('بدء الانتظار'),
+                    style: FilledButton.styleFrom(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(22),
+                      ),
+                      backgroundColor: colors.primary,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      elevation: 4,
+                      shadowColor: colors.primary.withValues(alpha: 0.25),
+                    ),
+                    label: const Text(
+                      'بدء الانتظار',
+                      style: TextStyle(
+                        fontFamily: 'Tajawal',
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
                   ),
                 ),
             ],
           ),
         ),
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          _ArrivalCard(
-            pickupStop: pickupStop,
-            usingCurrentLocation: usingCurrentLocation,
-            locating: locating,
-            locationError: locationError,
-            locationIssue: locationIssue,
-            arrival: arrival,
-            nearbyVehicles: nearbyVehicles,
-            skippedCount: skippedCount,
-            trackingIsStale: trackingIsStale,
-            stops: stops,
-            userLocation: userLat != null && userLng != null ? LatLng(userLat!, userLng!) : null,
-            nearestRoutePoint: pickupLat != null && pickupLng != null ? LatLng(pickupLat!, pickupLng!) : null,
-            onUseCurrentLocation: () => _useCurrentLocation(stops, route.id),
-            onSelectPickup: () => _showPickupSelector(stops, route.id),
-            onOpenLocationSettings: _openLocationSettings,
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFFF3F8FC), Color(0xFFFFFFFF)],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
           ),
-          const SizedBox(height: 12),
-          _RouteDetailsPanel(
-            route: route,
-            stops: stops,
-            pickupStop: pickupStop,
-            onReport: () => showModalBottomSheet<void>(
-              context: context,
-              isScrollControlled: true,
-              builder: (_) => ReportBottomSheet(routeId: route.id),
+        ),
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            _ArrivalCard(
+              pickupStop: pickupStop,
+              usingCurrentLocation: usingCurrentLocation,
+              locating: locating,
+              locationError: locationError,
+              locationIssue: locationIssue,
+              arrival: arrival,
+              nearbyVehicles: nearbyVehicles,
+              skippedCount: skippedCount,
+              trackingIsStale: trackingIsStale,
+              stops: stops,
+              userLocation: userLat != null && userLng != null ? LatLng(userLat!, userLng!) : null,
+              nearestRoutePoint: pickupLat != null && pickupLng != null ? LatLng(pickupLat!, pickupLng!) : null,
+              onUseCurrentLocation: () => _useCurrentLocation(stops, route.id, isWaitingForThisRoute),
+              onSelectPickup: () => _showPickupSelector(stops, route.id, isWaitingForThisRoute),
+              onOpenLocationSettings: _openLocationSettings,
             ),
-          ),
-          const SizedBox(height: 92),
-        ],
+            const SizedBox(height: 12),
+            _RouteDetailsPanel(
+              route: route,
+              stops: stops,
+              pickupStop: pickupStop,
+              onReport: () => showModalBottomSheet<void>(
+                context: context,
+                isScrollControlled: true,
+                builder: (_) => ReportBottomSheet(routeId: route.id),
+              ),
+            ),
+            const SizedBox(height: 92),
+          ],
+        ),
       ),
     );
   }
@@ -227,8 +313,6 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
     if (lastSeenAt == null) return false;
     return DateTime.now().difference(lastSeenAt.toLocal()).inMinutes >= 5;
   }
-
-
 
   Future<void> _toggleSaved(String routeId, bool saved) async {
     await ref.read(transitRepositoryProvider).setRouteSaved(routeId, saved);
@@ -322,7 +406,7 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
     return stops[pickupStopIndex!];
   }
 
-  void _showPickupSelector(List<TransitStop> stops, String routeId) {
+  void _showPickupSelector(List<TransitStop> stops, String routeId, bool isWaiting) {
     showModalBottomSheet<void>(
       context: context,
       builder: (context) {
@@ -356,8 +440,9 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
                       locationError = null;
                       locationIssue = null;
                     });
-                    _startPassengerWait(routeId, item.$2.lat, item.$2.lng)
-                        .then((_) => _startLocationStream(stops, routeId));
+                    if (isWaiting) {
+                      _startPassengerWait(routeId, item.$2.lat, item.$2.lng);
+                    }
                     Navigator.pop(context);
                   },
                 ),
@@ -370,7 +455,7 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
   }
 
   Future<void> _useCurrentLocation(
-      List<TransitStop> stops, String routeId) async {
+      List<TransitStop> stops, String routeId, bool isWaiting) async {
     if (!mounted) return;
     setState(() {
       locating = true;
@@ -412,9 +497,9 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
         pickupLat = nearestOnLine.latitude;
         pickupLng = nearestOnLine.longitude;
       });
-      await _startPassengerWait(routeId, pickupLat!, pickupLng!);
-      if (!mounted) return;
-      _startLocationStream(stops, routeId);
+      if (isWaiting) {
+        await _startPassengerWait(routeId, pickupLat!, pickupLng!);
+      }
     } on LocationServiceDisabledException {
       if (!mounted) return;
       setState(() {
@@ -455,9 +540,6 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
 
   Future<void> _startPassengerWait(
       String routeId, double lat, double lng) async {
-    setState(() {
-      waitSyncError = null;
-    });
     final session =
         await ref.read(transitRepositoryProvider).startPassengerWait(
               routeId: routeId,
@@ -466,18 +548,13 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
             );
     if (!mounted) return;
     if (session == null || session.id.isEmpty) {
-      setState(() {
-        waitSyncError =
-            'ما قدرنا نظهر انتظارك للسائق. تأكد من الاتصال وجرب مرة ثانية.';
-      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('ما قدرنا نظهر انتظارك للسائق. تأكد من الاتصال وجرب مرة ثانية.'),
+        ),
+      );
       return;
     }
-    setState(() {
-      waitSessionId = session.id;
-      waitStatus = session.status;
-      waitLastSyncedAt = DateTime.now();
-      waitSyncError = null;
-    });
     await ref
         .read(transitRepositoryProvider)
         .saveActiveWaitSessionId(session.id);
@@ -485,29 +562,22 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
         .read(transitRepositoryProvider)
         .saveActiveWaitRouteId(routeId);
     ref.invalidate(activeWaitRouteIdProvider);
-    _startWaitHeartbeat(lat, lng);
+    
+    if (mounted) {
+      context.go('/');
+    }
   }
 
   Future<void> _stopWaiting() async {
     final repository = ref.read(transitRepositoryProvider);
-    final waitId = waitSessionId ?? await repository.loadActiveWaitSessionId();
+    final waitId = await repository.loadActiveWaitSessionId();
     if (waitId != null && waitId.isNotEmpty) {
       await repository.cancelPassengerWait(waitId);
     }
-    await _positionSubscription?.cancel();
-    _positionSubscription = null;
-    _waitHeartbeatTimer?.cancel();
-    _waitHeartbeatTimer = null;
-    _arrivalRefreshTimer?.cancel();
-    _arrivalRefreshTimer = null;
     await repository.clearActiveWaitRouteId();
     if (!mounted) return;
     ref.invalidate(activeWaitRouteIdProvider);
     setState(() {
-      waitSessionId = null;
-      waitStatus = 'cancelled';
-      waitLastSyncedAt = null;
-      waitSyncError = null;
       pickupStopIndex = null;
       pickupLat = null;
       pickupLng = null;
@@ -516,113 +586,6 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
       const SnackBar(content: Text('تم إيقاف الانتظار، تكدر تختار خط ثاني.')),
     );
     context.go('/');
-  }
-
-  void _startLocationStream(List<TransitStop> stops, String routeId) {
-    final waitId = waitSessionId;
-    if (waitId == null || waitId.isEmpty) return;
-    _positionSubscription?.cancel();
-    _positionSubscription = KiyatLocation.getPositionStream(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.best,
-        distanceFilter: 10,
-      ),
-    ).listen((position) async {
-      final session =
-          await ref.read(transitRepositoryProvider).updatePassengerWait(
-                waitId: waitId,
-                lat: position.latitude,
-                lng: position.longitude,
-                accuracyMeters: position.accuracy,
-                speedMetersPerSecond:
-                    position.speed.isFinite && position.speed >= 0
-                        ? position.speed
-                        : null,
-              );
-      if (!mounted) return;
-      if (session == null) {
-        setState(() {
-          waitSyncError =
-              'تحديث موقعك ما وصل للسائق. راح نعيد المحاولة تلقائياً.';
-        });
-        return;
-      }
-
-      LatLng nextPickup = LatLng(pickupLat ?? position.latitude, pickupLng ?? position.longitude);
-      if (usingCurrentLocation) {
-        nextPickup = _findNearestPointOnRouteLine(
-          LatLng(position.latitude, position.longitude),
-          stops,
-        );
-      }
-
-      setState(() {
-        waitStatus = session.status;
-        waitLastSyncedAt = DateTime.now();
-        waitSyncError = null;
-        userLat = position.latitude;
-        userLng = position.longitude;
-        if (usingCurrentLocation) {
-          pickupLat = nextPickup.latitude;
-          pickupLng = nextPickup.longitude;
-        }
-      });
-      if (session.isBoarded) {
-        await _positionSubscription?.cancel();
-        _positionSubscription = null;
-        _waitHeartbeatTimer?.cancel();
-        _waitHeartbeatTimer = null;
-        await ref.read(transitRepositoryProvider).clearActiveWaitRouteId();
-        ref.invalidate(activeWaitRouteIdProvider);
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('اعتبرناك صعدت الكية، شلنا نقطة انتظارك.'),
-          ),
-        );
-        _showTripRatingSheet(routeId, waitId);
-      }
-    });
-  }
-
-  void _startWaitHeartbeat(double lat, double lng) {
-    _waitHeartbeatTimer?.cancel();
-    pickupLat = lat;
-    pickupLng = lng;
-    _waitHeartbeatTimer = Timer.periodic(const Duration(seconds: 45), (_) {
-      final waitId = waitSessionId;
-      final nextLat = userLat ?? pickupLat;
-      final nextLng = userLng ?? pickupLng;
-      if (waitId == null ||
-          waitId.isEmpty ||
-          waitStatus != 'waiting' ||
-          nextLat == null ||
-          nextLng == null) {
-        return;
-      }
-      ref
-          .read(transitRepositoryProvider)
-          .updatePassengerWait(
-            waitId: waitId,
-            lat: nextLat,
-            lng: nextLng,
-          )
-          .then((session) {
-        if (!mounted) return;
-        if (session == null) {
-          setState(() {
-            waitSyncError =
-                'تحديث ظهورك للسائق تأخر. راح نعيد المحاولة تلقائياً.';
-          });
-          return;
-        }
-        setState(() {
-          waitStatus = session.status;
-          waitLastSyncedAt = DateTime.now();
-          waitSyncError = null;
-        });
-      });
-    });
   }
 
   int _nearestStopIndex(List<TransitStop> stops, double lat, double lng) {
@@ -679,148 +642,6 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
 
     return LatLng(y1 + dy * t, x1 + dx * t);
   }
-
-  void _showTripRatingSheet(String routeId, String waitId) {
-    if (ratingPromptShown) return;
-    ratingPromptShown = true;
-    var rating = 5;
-    var cleanliness = 5;
-    var crowding = 'medium';
-    var priceFair = true;
-    final commentController = TextEditingController();
-
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setSheetState) {
-            Future<void> submit() async {
-              final success = await ref.read(transitRepositoryProvider).submitTripRating(
-                    routeId: routeId,
-                    passengerWaitId: waitId,
-                    rating: rating,
-                    crowdingLevel: crowding,
-                    priceFair: priceFair,
-                    cleanlinessRating: cleanliness,
-                    comment: commentController.text,
-                  );
-              if (!context.mounted) return;
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text(
-                    success
-                        ? 'شكراً، سجلنا تقييمك للرحلة.'
-                        : 'ما قدرنا نسجل التقييم حالياً.',
-                  ),
-                ),
-              );
-            }
-
-            return Padding(
-              padding: EdgeInsets.only(
-                left: 18,
-                right: 18,
-                top: 18,
-                bottom: MediaQuery.of(context).viewInsets.bottom + 18,
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text('كيف كانت الكية؟', style: Theme.of(context).textTheme.titleLarge),
-                  const SizedBox(height: 12),
-                  _RatingStars(
-                    value: rating,
-                    onChanged: (value) => setSheetState(() => rating = value),
-                  ),
-                  const SizedBox(height: 14),
-                  SegmentedButton<String>(
-                    segments: const [
-                      ButtonSegment(value: 'low', label: Text('خفيف')),
-                      ButtonSegment(value: 'medium', label: Text('متوسط')),
-                      ButtonSegment(value: 'high', label: Text('مزدحم')),
-                    ],
-                    selected: {crowding},
-                    onSelectionChanged: (value) {
-                      setSheetState(() => crowding = value.first);
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('السعر كان مناسب'),
-                    value: priceFair,
-                    onChanged: (value) => setSheetState(() => priceFair = value),
-                  ),
-                  Row(
-                    children: [
-                      const Expanded(child: Text('النظافة')),
-                      _RatingStars(
-                        value: cleanliness,
-                        compact: true,
-                        onChanged: (value) => setSheetState(() => cleanliness = value),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: commentController,
-                    maxLines: 2,
-                    decoration: const InputDecoration(
-                      hintText: 'ملاحظة اختيارية',
-                      prefixIcon: Icon(Icons.notes_outlined),
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  FilledButton(
-                    onPressed: submit,
-                    child: const Text('إرسال التقييم'),
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
-    ).whenComplete(commentController.dispose);
-  }
-}
-
-class _RatingStars extends StatelessWidget {
-  const _RatingStars({
-    required this.value,
-    required this.onChanged,
-    this.compact = false,
-  });
-
-  final int value;
-  final ValueChanged<int> onChanged;
-  final bool compact;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        for (var index = 1; index <= 5; index += 1)
-          IconButton(
-            visualDensity: compact ? VisualDensity.compact : null,
-            padding: compact ? EdgeInsets.zero : null,
-            constraints: compact
-                ? const BoxConstraints.tightFor(width: 34, height: 34)
-                : null,
-            onPressed: () => onChanged(index),
-            icon: Icon(
-              index <= value ? Icons.star_rounded : Icons.star_border_rounded,
-              color: Colors.amber.shade700,
-              size: compact ? 24 : 32,
-            ),
-          ),
-      ],
-    );
-  }
 }
 
 class _ArrivalCard extends StatelessWidget {
@@ -862,33 +683,65 @@ class _ArrivalCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     if (pickupStop == null) {
+      final cardColor = locating ? colors.primary : colors.error;
       return Container(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
-            color: locating ? colors.primary : colors.error,
-            borderRadius: BorderRadius.circular(8)),
+          color: cardColor.withValues(alpha: 0.05),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(
+            color: cardColor.withValues(alpha: 0.15),
+            width: 1.2,
+          ),
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(locating ? Icons.my_location : Icons.location_off_outlined,
-                color: Colors.white),
-            const SizedBox(height: 10),
-            Text(locating ? 'دا نحدد موقعك الحالي' : 'ما قدرنا نحدد موقعك',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    color: Colors.white, fontWeight: FontWeight.w800)),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: cardColor.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                locating ? Icons.my_location : Icons.location_off_outlined,
+                color: cardColor,
+                size: 24,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              locating ? 'دا نحدد موقعك الحالي' : 'ما قدرنا نحدد موقعك',
+              style: TextStyle(
+                fontFamily: 'Tajawal',
+                fontWeight: FontWeight.w900,
+                fontSize: 18,
+                color: cardColor,
+              ),
+            ),
             const SizedBox(height: 6),
             Text(
-                locating
-                    ? 'راح نطلع أقرب نقطة صعود عليك وأقرب كية جاية بنفس الاتجاه.'
-                    : 'اختار مكانك يدوياً أو جرّب إعادة تحديد الموقع.',
-                style: TextStyle(color: Colors.white)),
+              locating
+                  ? 'راح نطلع أقرب نقطة صعود عليك وأقرب كية جاية بنفس الاتجاه.'
+                  : 'اختار مكانك يدوياً أو جرّب إعادة تحديد الموقع.',
+              style: TextStyle(
+                fontFamily: 'Tajawal',
+                fontWeight: FontWeight.w700,
+                color: Colors.grey.shade800,
+              ),
+            ),
             if (locationError != null) ...[
               const SizedBox(height: 10),
-              Text(locationError!,
-                  style: const TextStyle(
-                      color: Colors.white, fontWeight: FontWeight.w700)),
+              Text(
+                locationError!,
+                style: TextStyle(
+                  fontFamily: 'Tajawal',
+                  fontWeight: FontWeight.w800,
+                  color: cardColor,
+                ),
+              ),
             ],
-            const SizedBox(height: 12),
+            const SizedBox(height: 16),
             Row(
               children: [
                 Expanded(
@@ -925,89 +778,90 @@ class _ArrivalCard extends StatelessWidget {
     }
 
     final selectedPickupStop = pickupStop!;
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: colors.primary.withValues(alpha: 0.18))),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _LocationModeStrip(
-            pickupStop: selectedPickupStop,
-            usingCurrentLocation: usingCurrentLocation,
-            locating: locating,
-            locationError: locationError,
-            locationIssue: locationIssue,
-            onUseCurrentLocation: onUseCurrentLocation,
-            onSelectPickup: onSelectPickup,
-            onOpenLocationSettings: onOpenLocationSettings,
-          ),
-          const SizedBox(height: 12),
-          SizedBox(
-            height: 230,
-            child: LiveRouteMap(
-              stops: stops,
-              vehicles: nearbyVehicles,
-              pickupStop: selectedPickupStop,
-              selectedVehicle: arrival,
-              compact: true,
-              userLocation: userLocation,
-              nearestRoutePoint: nearestRoutePoint,
-            ),
-          ),
-          const SizedBox(height: 12),
-          if (arrival == null)
-            _NoArrivalPanel(
+    return _GlassCard(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _LocationModeStrip(
               pickupStop: selectedPickupStop,
               usingCurrentLocation: usingCurrentLocation,
-            )
-          else ...[
-            _StatusLine(
-              icon: Icons.directions_bus_filled,
-              label: 'أقرب كية',
-              value:
-                  '${arrival!.vehicleLabel} قرب ${arrival!.nearStopName}، تبعد ${arrival!.distanceMeters} م',
+              locating: locating,
+              locationError: locationError,
+              locationIssue: locationIssue,
+              onUseCurrentLocation: onUseCurrentLocation,
+              onSelectPickup: onSelectPickup,
+              onOpenLocationSettings: onOpenLocationSettings,
             ),
-            const SizedBox(height: 8),
-            _StatusLine(
-              icon: Icons.timer_outlined,
-              label: 'توصل خلال',
-              value:
-                  '${arrival!.etaMinutes} دقيقة تقريباً (${arrival!.etaConfidenceLabel})',
+            const SizedBox(height: 12),
+            SizedBox(
+              height: 230,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(20),
+                child: LiveRouteMap(
+                  stops: stops,
+                  vehicles: nearbyVehicles,
+                  pickupStop: selectedPickupStop,
+                  selectedVehicle: arrival,
+                  compact: true,
+                  userLocation: userLocation,
+                  nearestRoutePoint: nearestRoutePoint,
+                ),
+              ),
             ),
-            if (arrival!.lastSeenSeconds != null) ...[
-              const SizedBox(height: 8),
+            const SizedBox(height: 12),
+            if (arrival == null)
+              _NoArrivalPanel(
+                pickupStop: selectedPickupStop,
+                usingCurrentLocation: usingCurrentLocation,
+              )
+            else ...[
               _StatusLine(
-                icon: Icons.sensors,
-                label: 'آخر تحديث',
-                value: _secondsAgoArabic(arrival!.lastSeenSeconds!),
-                color: arrival!.etaConfidence == 'low'
-                    ? Colors.red.shade700
-                    : null,
+                icon: Icons.directions_bus_filled,
+                label: 'أقرب كية',
+                value:
+                    '${arrival!.vehicleLabel} قرب ${arrival!.nearStopName}، تبعد ${arrival!.distanceMeters} م',
               ),
-            ],
-            if (skippedCount > 0) ...[
-              const SizedBox(height: 8),
+              const SizedBox(height: 10),
               _StatusLine(
-                icon: Icons.history_toggle_off,
-                label: 'تم تجاهل',
-                value: '$skippedCount كية لأنها عدّت مكانك',
-                color: Colors.orange.shade800,
+                icon: Icons.timer_outlined,
+                label: 'توصل خلال',
+                value:
+                    '${arrival!.etaMinutes} دقيقة تقريباً (${arrival!.etaConfidenceLabel})',
               ),
-            ],
-            if (trackingIsStale) ...[
-              const SizedBox(height: 8),
-              _StatusLine(
-                icon: Icons.sensors_off_outlined,
-                label: 'تنبيه',
-                value: 'تتبع الكية متأخر، اعتبر الوقت تقريبي.',
-                color: Colors.red.shade700,
-              ),
+              if (arrival!.lastSeenSeconds != null) ...[
+                const SizedBox(height: 10),
+                _StatusLine(
+                  icon: Icons.sensors,
+                  label: 'آخر تحديث',
+                  value: _secondsAgoArabic(arrival!.lastSeenSeconds!),
+                  color: arrival!.etaConfidence == 'low'
+                      ? Colors.red.shade700
+                      : null,
+                ),
+              ],
+              if (skippedCount > 0) ...[
+                const SizedBox(height: 10),
+                _StatusLine(
+                  icon: Icons.history_toggle_off,
+                  label: 'تم تجاهل',
+                  value: '$skippedCount كية لأنها عدّت مكانك',
+                  color: Colors.orange.shade800,
+                ),
+              ],
+              if (trackingIsStale) ...[
+                const SizedBox(height: 10),
+                _StatusLine(
+                  icon: Icons.sensors_off_outlined,
+                  label: 'تنبيه',
+                  value: 'تتبع الكية متأخر، اعتبر الوقت تقريبي.',
+                  color: Colors.red.shade700,
+                ),
+              ],
             ],
           ],
-        ],
+        ),
       ),
     );
   }
@@ -1050,28 +904,51 @@ class _LocationModeStrip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: colors.primary.withValues(alpha: 0.07),
-        borderRadius: BorderRadius.circular(12),
+        color: colors.primary.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: colors.primary.withValues(alpha: 0.08),
+          width: 1.0,
+        ),
       ),
       child: Row(
         children: [
-          Icon(
-            usingCurrentLocation ? Icons.my_location : Icons.place_outlined,
-            color: colors.primary,
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: colors.primary.withValues(alpha: 0.1),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              usingCurrentLocation ? Icons.my_location : Icons.place_outlined,
+              color: colors.primary,
+              size: 20,
+            ),
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title,
-                    style: const TextStyle(fontWeight: FontWeight.w900)),
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontFamily: 'Tajawal',
+                    fontWeight: FontWeight.w900,
+                    fontSize: 14.5,
+                  ),
+                ),
                 const SizedBox(height: 2),
                 Text(
                   subtitle,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: Colors.grey.shade700),
+                  style: TextStyle(
+                    fontFamily: 'Tajawal',
+                    fontWeight: FontWeight.w700,
+                    fontSize: 12,
+                    color: Colors.grey.shade700,
+                  ),
                 ),
               ],
             ),
@@ -1086,6 +963,9 @@ class _LocationModeStrip extends StatelessWidget {
           ],
           IconButton.outlined(
             onPressed: locating ? null : onUseCurrentLocation,
+            style: IconButton.styleFrom(
+              side: BorderSide(color: colors.primary.withValues(alpha: 0.15)),
+            ),
             icon: locating
                 ? const SizedBox(
                     width: 18,
@@ -1098,6 +978,9 @@ class _LocationModeStrip extends StatelessWidget {
           const SizedBox(width: 6),
           IconButton.outlined(
             onPressed: onSelectPickup,
+            style: IconButton.styleFrom(
+              side: BorderSide(color: colors.primary.withValues(alpha: 0.15)),
+            ),
             icon: const Icon(Icons.edit_location_alt_outlined),
             tooltip: 'اختيار يدوي',
           ),
@@ -1135,477 +1018,6 @@ enum _LocationIssue {
   unknown,
 }
 
-class _PassengerNextStepCard extends StatelessWidget {
-  const _PassengerNextStepCard({
-    required this.waitIsVisible,
-    required this.waitSyncError,
-    required this.locating,
-    required this.arrival,
-    required this.pickupStop,
-    required this.trackingIsStale,
-    required this.onRetry,
-    required this.onUseCurrentLocation,
-    this.userLocation,
-    this.nearestRoutePoint,
-  });
-
-  final bool waitIsVisible;
-  final String? waitSyncError;
-  final bool locating;
-  final VehicleArrivalEstimate? arrival;
-  final TransitStop? pickupStop;
-  final bool trackingIsStale;
-  final VoidCallback? onRetry;
-  final VoidCallback onUseCurrentLocation;
-  final LatLng? userLocation;
-  final LatLng? nearestRoutePoint;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    
-    double? distanceMeters;
-    if (userLocation != null && nearestRoutePoint != null) {
-      distanceMeters = Geolocator.distanceBetween(
-        userLocation!.latitude,
-        userLocation!.longitude,
-        nearestRoutePoint!.latitude,
-        nearestRoutePoint!.longitude,
-      );
-    }
-    final isOffRoute = distanceMeters != null && distanceMeters > 35;
-    
-    final title = _getTitle(isOffRoute);
-    final subtitle = _getSubtitle(isOffRoute, distanceMeters);
-    final icon = _getIcon(isOffRoute);
-    final color = _getColor(colors, isOffRoute);
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.09),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: color.withValues(alpha: 0.22)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.14),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(icon, color: color, size: 28),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w900,
-                          ),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      subtitle,
-                      style: TextStyle(color: Colors.grey.shade800),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          if (waitSyncError != null || locating) ...[
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: FilledButton.tonalIcon(
-                    onPressed: locating ? null : onUseCurrentLocation,
-                    icon: locating
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.my_location),
-                    label: Text(locating ? 'دا نحدد...' : 'حدث موقعي'),
-                  ),
-                ),
-                if (waitSyncError != null) ...[
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: FilledButton.icon(
-                      onPressed: onRetry,
-                      icon: const Icon(Icons.visibility_outlined),
-                      label: const Text('أظهرني للسائق'),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  String _getTitle(bool isOffRoute) {
-    if (locating) return 'نثبت موقعك';
-    if (waitSyncError != null) return 'أنت غير ظاهر للسائق';
-    if (!waitIsVisible) return 'دا نظهرك للسائق';
-    if (isOffRoute) return 'توجه إلى مسار الخط';
-    if (arrival == null) return 'أنت ظاهر، انتظر كية';
-    if (trackingIsStale) return 'الكية ظاهرة بس التحديث متأخر';
-    if (arrival!.etaMinutes <= 2) return 'جهز، الكية قريبة';
-    return 'أنت ظاهر، الكية بالطريق';
-  }
-
-  String _getSubtitle(bool isOffRoute, double? distanceMeters) {
-    if (locating) return 'خلي الموقع مفتوح حتى نحدد أقرب نقطة صعود.';
-    if (waitSyncError != null) return waitSyncError!;
-    if (!waitIsVisible) return 'نرسل موقع انتظارك للسائقين على هذا الخط.';
-    if (isOffRoute && distanceMeters != null) {
-      final distanceRounded = distanceMeters.round();
-      final vehicleText = arrival == null
-          ? 'ماكو كية قريبة حالياً'
-          : 'والكية ${arrival!.vehicleLabel} راح توصل خلال ${arrival!.etaMinutes} دقيقة تقريباً';
-      return 'امشي روح لهذه النقطة (على بعد $distanceRounded متر) لكي تظهر كراكب، $vehicleText.';
-    }
-    final place =
-        pickupStop == null ? 'مكانك الحالي' : 'قرب ${pickupStop!.nameAr}';
-    if (arrival == null) {
-      return 'السائقين يشوفونك عند $place. أول كية تظهر راح نعرضها هنا.';
-    }
-    final lastSeen = arrival!.lastSeenSeconds == null
-        ? ''
-        : '، آخر تحديث ${_secondsAgoArabic(arrival!.lastSeenSeconds!)}';
-    return '${arrival!.vehicleLabel} تبعد ${arrival!.distanceMeters} م وتوصل خلال ${arrival!.etaMinutes} دقيقة تقريباً (${arrival!.etaConfidenceLabel}$lastSeen).';
-  }
-
-  IconData _getIcon(bool isOffRoute) {
-    if (locating) return Icons.my_location;
-    if (waitSyncError != null) return Icons.visibility_off_outlined;
-    if (!waitIsVisible) return Icons.sync_outlined;
-    if (isOffRoute) return Icons.directions_walk;
-    if (arrival == null) return Icons.visibility_outlined;
-    if (arrival!.etaMinutes <= 2) return Icons.notifications_active_outlined;
-    return Icons.directions_bus_filled;
-  }
-
-  Color _getColor(ColorScheme colors, bool isOffRoute) {
-    if (waitSyncError != null) return colors.error;
-    if (locating || !waitIsVisible) return Colors.orange.shade800;
-    if (isOffRoute) return Colors.orange.shade800;
-    if (arrival != null && arrival!.etaMinutes <= 2) {
-      return Colors.blue.shade700;
-    }
-    return colors.primary;
-  }
-}
-
-class _WaitVisibilityCard extends StatelessWidget {
-  const _WaitVisibilityCard({
-    required this.waitStatus,
-    required this.waitLastSyncedAt,
-    required this.waitSyncError,
-    required this.pickupStop,
-    required this.usingCurrentLocation,
-    required this.locating,
-    required this.onRetry,
-    required this.onStopWaiting,
-    this.userLocation,
-    this.nearestRoutePoint,
-  });
-
-  final String? waitStatus;
-  final DateTime? waitLastSyncedAt;
-  final String? waitSyncError;
-  final TransitStop? pickupStop;
-  final bool usingCurrentLocation;
-  final bool locating;
-  final VoidCallback? onRetry;
-  final VoidCallback onStopWaiting;
-  final LatLng? userLocation;
-  final LatLng? nearestRoutePoint;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    
-    double? distanceMeters;
-    if (userLocation != null && nearestRoutePoint != null) {
-      distanceMeters = Geolocator.distanceBetween(
-        userLocation!.latitude,
-        userLocation!.longitude,
-        nearestRoutePoint!.latitude,
-        nearestRoutePoint!.longitude,
-      );
-    }
-    final isOffRoute = distanceMeters != null && distanceMeters > 35;
-    
-    final isVisible = waitStatus == 'waiting' && waitSyncError == null && !isOffRoute;
-    final isBoarded = waitStatus == 'boarded';
-    final icon = isBoarded
-        ? Icons.check_circle_outline
-        : isVisible
-            ? Icons.visibility_outlined
-            : isOffRoute
-                ? Icons.visibility_off_outlined
-                : waitSyncError != null
-                    ? Icons.visibility_off_outlined
-                    : Icons.sync_outlined;
-    final color = isBoarded
-        ? Colors.blue.shade700
-        : isVisible
-            ? colors.primary
-            : isOffRoute
-                ? Colors.orange.shade800
-                : waitSyncError != null
-                    ? colors.error
-                    : Colors.orange.shade800;
-    final title = isBoarded
-        ? 'تم إخفاء انتظارك'
-        : isVisible
-            ? 'أنت ظاهر للسائقين'
-            : isOffRoute
-                ? 'انتظارك غير ظاهر حالياً (خارج الخط)'
-                : waitSyncError != null
-                    ? 'انتظارك غير ظاهر حالياً'
-                    : 'دا نثبت انتظارك';
-    final subtitle = isBoarded
-        ? 'اعتبرناك صعدت الكية، وما راح تظهر كنقطة انتظار للسائق.'
-        : isOffRoute
-            ? 'أنت على بعد ${distanceMeters.round()} متر من الخط. تقرّب من الشارع العام حتى تظهر للسواق.'
-            : waitSyncError ??
-                (isVisible
-                    ? _visibleMessage
-                    : 'نرسل موقع صعودك للسائقين على هذا الخط.');
-
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: color.withValues(alpha: 0.28)),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          CircleAvatar(
-            backgroundColor: color.withValues(alpha: 0.12),
-            foregroundColor: color,
-            child: Icon(icon),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title,
-                    style: const TextStyle(fontWeight: FontWeight.w900)),
-                const SizedBox(height: 4),
-                Text(subtitle, style: TextStyle(color: Colors.grey.shade700)),
-                if (waitLastSyncedAt != null && isVisible) ...[
-                  const SizedBox(height: 6),
-                  Text(
-                    'آخر تحديث وصل قبل ${_relativeArabic(waitLastSyncedAt!)}',
-                    style: TextStyle(
-                      color: colors.primary,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ],
-                if (waitSyncError != null) ...[
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      FilledButton.tonalIcon(
-                        onPressed: locating ? null : onRetry,
-                        icon: const Icon(Icons.refresh),
-                        label: const Text('إعادة الإظهار'),
-                      ),
-                      const SizedBox(width: 8),
-                      TextButton(
-                        onPressed: onStopWaiting,
-                        child: const Text('إيقاف الانتظار'),
-                      ),
-                    ],
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  String get _visibleMessage {
-    final place = pickupStop == null ? 'موقعك' : 'قرب ${pickupStop!.nameAr}';
-    final source =
-        usingCurrentLocation ? 'من موقعك الحالي' : 'من اختيارك اليدوي';
-    return 'نقطة انتظارك ظاهرة للسائق $place، وتتحدث $source.';
-  }
-}
-
-class _WaitingHeader extends StatelessWidget {
-  const _WaitingHeader({
-    required this.route,
-    required this.arrival,
-    required this.pickupStop,
-    required this.locating,
-    required this.hasLocationError,
-    required this.waitStatus,
-    required this.waitIsVisible,
-    required this.trackingIsStale,
-    this.userLocation,
-    this.nearestRoutePoint,
-  });
-
-  final TransitRoute route;
-  final VehicleArrivalEstimate? arrival;
-  final TransitStop? pickupStop;
-  final bool locating;
-  final bool hasLocationError;
-  final String? waitStatus;
-  final bool waitIsVisible;
-  final bool trackingIsStale;
-  final LatLng? userLocation;
-  final LatLng? nearestRoutePoint;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    
-    double? distanceMeters;
-    if (userLocation != null && nearestRoutePoint != null) {
-      distanceMeters = Geolocator.distanceBetween(
-        userLocation!.latitude,
-        userLocation!.longitude,
-        nearestRoutePoint!.latitude,
-        nearestRoutePoint!.longitude,
-      );
-    }
-    final isOffRoute = distanceMeters != null && distanceMeters > 35;
-    
-    final etaText = locating
-        ? '...'
-        : hasLocationError
-            ? '-'
-            : arrival == null
-                ? '-'
-                : '${arrival!.etaMinutes}';
-    final etaLabel = waitStatus == 'boarded'
-        ? 'اعتبرناك صعدت، شلنا نقطة انتظارك من السائق'
-        : isOffRoute
-            ? 'أنت غير ظاهر للسواق حالياً (ابتعدت عن الخط)'
-            : waitIsVisible
-                ? 'أنت ظاهر للسائقين على هذا الخط'
-                : trackingIsStale
-                    ? 'التتبع متأخر، الوقت تقريبي'
-                    : locating
-                        ? 'دا نحدد موقعك'
-                        : hasLocationError
-                            ? 'الموقع يحتاج تحديث'
-                            : arrival == null
-                                ? 'بانتظار ظهور كية'
-                                : 'دقيقة وتوصل لمكانك';
-
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: isOffRoute ? Colors.orange.shade800 : colors.primary,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 46,
-                height: 46,
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.16),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Icon(Icons.directions_bus_filled,
-                    color: Colors.white),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('أنت تنتظر',
-                        style: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.82),
-                            fontWeight: FontWeight.w700)),
-                    Text(route.nameAr,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            color: Colors.white, fontWeight: FontWeight.w900)),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 18),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(etaText,
-                  style: Theme.of(context).textTheme.displaySmall?.copyWith(
-                      color: Colors.white, fontWeight: FontWeight.w900)),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Text(etaLabel,
-                      style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.9),
-                          fontWeight: FontWeight.w700)),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              const Icon(Icons.place_outlined, color: Colors.white, size: 18),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  pickupStop == null
-                      ? 'نحدد أقرب نقطة صعود عليك'
-                      : 'مكان صعودك قرب ${pickupStop!.nameAr}',
-                  style: TextStyle(color: Colors.white.withValues(alpha: 0.9)),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-String _relativeArabic(DateTime dateTime) {
-  final difference = DateTime.now().difference(dateTime);
-  if (difference.inSeconds < 45) return 'ثواني';
-  if (difference.inMinutes < 60) return '${difference.inMinutes} دقيقة';
-  return '${difference.inHours} ساعة';
-}
-
 String _secondsAgoArabic(int seconds) {
   if (seconds < 45) return 'قبل ثواني';
   final minutes = (seconds / 60).round();
@@ -1628,13 +1040,38 @@ class _StatusLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final lineColor = color ?? Theme.of(context).colorScheme.primary;
+    final colors = Theme.of(context).colorScheme;
+    final lineColor = color ?? colors.primary;
     return Row(
       children: [
-        Icon(icon, size: 18, color: lineColor),
-        const SizedBox(width: 8),
-        Text('$label: ', style: const TextStyle(fontWeight: FontWeight.w800)),
-        Expanded(child: Text(value)),
+        Container(
+          padding: const EdgeInsets.all(6),
+          decoration: BoxDecoration(
+            color: lineColor.withValues(alpha: 0.1),
+            shape: BoxShape.circle,
+          ),
+          child: Icon(icon, size: 16, color: lineColor),
+        ),
+        const SizedBox(width: 10),
+        Text(
+          '$label: ',
+          style: const TextStyle(
+            fontFamily: 'Tajawal',
+            fontWeight: FontWeight.w900,
+            fontSize: 13.5,
+          ),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            style: TextStyle(
+              fontFamily: 'Tajawal',
+              fontWeight: FontWeight.w800,
+              fontSize: 13.5,
+              color: color ?? const Color(0xFF173244),
+            ),
+          ),
+        ),
       ],
     );
   }
@@ -1704,31 +1141,65 @@ class _RouteDetailsPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: colors.outlineVariant.withValues(alpha: 0.5)),
-      ),
+    return _GlassCard(
       child: ExpansionTile(
-        tilePadding: const EdgeInsets.symmetric(horizontal: 14),
-        childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
-        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
-        collapsedShape:
-            const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
-        leading: Icon(Icons.route_outlined, color: colors.primary),
-        title: const Text('تفاصيل الخط',
-            style: TextStyle(fontWeight: FontWeight.w900)),
-        subtitle: const Text('الأجرة، الدوام، ونقاط الدلالة'),
+        tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        shape: Border.all(color: Colors.transparent),
+        collapsedShape: Border.all(color: Colors.transparent),
+        leading: Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: colors.primary.withValues(alpha: 0.1),
+            shape: BoxShape.circle,
+          ),
+          child: Icon(Icons.route_outlined, color: colors.primary, size: 20),
+        ),
+        title: const Text(
+          'تفاصيل الخط',
+          style: TextStyle(
+            fontFamily: 'Tajawal',
+            fontWeight: FontWeight.w900,
+            fontSize: 15.5,
+          ),
+        ),
+        subtitle: const Text(
+          'الأجرة، الدوام، ونقاط الدلالة',
+          style: TextStyle(
+            fontFamily: 'Tajawal',
+            fontWeight: FontWeight.w700,
+            fontSize: 12.5,
+          ),
+        ),
         children: [
           _RouteSummary(route: route),
           const SizedBox(height: 12),
           _LandmarkStrip(stops: stops, pickupStop: pickupStop),
           const SizedBox(height: 12),
-          OutlinedButton.icon(
-            onPressed: onReport,
-            icon: Icon(Icons.report_outlined, color: colors.error),
-            label: const Text('بلّغ عن تغيير بالخط'),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: onReport,
+              icon: Icon(Icons.report_outlined, color: colors.error, size: 18),
+              style: OutlinedButton.styleFrom(
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                foregroundColor: colors.error,
+                side: BorderSide(
+                  color: colors.error.withValues(alpha: 0.18),
+                ),
+                backgroundColor: colors.error.withValues(alpha: 0.03),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+              label: const Text(
+                'بلّغ عن تغيير بالخط',
+                style: TextStyle(
+                  fontFamily: 'Tajawal',
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
           ),
         ],
       ),
@@ -1882,8 +1353,11 @@ class _LandmarkRow extends StatelessWidget {
 }
 
 class _InfoTile extends StatelessWidget {
-  const _InfoTile(
-      {required this.icon, required this.title, required this.subtitle});
+  const _InfoTile({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+  });
 
   final IconData icon;
   final String title;
@@ -1891,22 +1365,88 @@ class _InfoTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-          color: Colors.white, borderRadius: BorderRadius.circular(8)),
+        color: colors.primary.withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: colors.primary.withValues(alpha: 0.08),
+          width: 1.0,
+        ),
+      ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: Theme.of(context).colorScheme.primary),
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: colors.primary.withValues(alpha: 0.1),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, size: 20, color: colors.primary),
+          ),
           const SizedBox(width: 12),
           Expanded(
-            child:
-                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
-              Text(subtitle)
-            ]),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontFamily: 'Tajawal',
+                    fontWeight: FontWeight.w900,
+                    fontSize: 14.5,
+                    height: 1.2,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  subtitle,
+                  style: TextStyle(
+                    fontFamily: 'Tajawal',
+                    fontWeight: FontWeight.w700,
+                    fontSize: 12,
+                    color: Colors.grey.shade700,
+                    height: 1.3,
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _GlassCard extends StatelessWidget {
+  const _GlassCard({required this.child});
+  final Widget child;
+  static const double radius = 28;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(radius),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF071827).withValues(alpha: 0.05),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+          ),
+        ],
+        border: Border.all(
+          color: const Color(0xFF1B5E8B).withValues(alpha: 0.08),
+          width: 1.2,
+        ),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(radius),
+        child: child,
       ),
     );
   }

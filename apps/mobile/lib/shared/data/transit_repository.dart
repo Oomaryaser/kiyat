@@ -60,9 +60,12 @@ class TransitRepository {
           .whereType<Map<String, dynamic>>()
           .map(TransitRoute.fromJson)
           .toList();
-      return routes.isEmpty ? _fallbackRoutes : routes;
+      if (routes.isEmpty) {
+        throw Exception('No routes found');
+      }
+      return routes;
     } catch (_) {
-      return _fallbackRoutes;
+      rethrow;
     }
   }
 
@@ -70,10 +73,12 @@ class TransitRepository {
     try {
       final response = await _dio.get<Map<String, dynamic>>('/routes/$routeId');
       final detail = TransitRouteDetail.fromJson(response.data ?? const {});
-      if (detail.stops.isEmpty) return _fallbackDetail;
+      if (detail.stops.isEmpty) {
+        throw Exception('Route has no path anchors');
+      }
       return detail;
     } catch (_) {
-      return _fallbackDetail;
+      rethrow;
     }
   }
 
@@ -90,7 +95,7 @@ class TransitRepository {
       );
       return RouteArrivalSnapshot.fromJson(response.data ?? const {});
     } catch (_) {
-      return RouteArrivalSnapshot.fallback();
+      rethrow;
     }
   }
 
@@ -131,6 +136,11 @@ class TransitRepository {
           if (speedMetersPerSecond != null)
             'speedMetersPerSecond': speedMetersPerSecond,
         },
+        options: Options(
+          headers: {
+            'X-Anonymous-Session-Id': await _anonymousSessionId(),
+          },
+        ),
       );
       return PassengerWaitSession.fromJson(response.data ?? const {});
     } catch (_) {
@@ -142,6 +152,11 @@ class TransitRepository {
     try {
       final response = await _dio.post<Map<String, dynamic>>(
         '/tracking/passenger-waits/$waitId/cancel',
+        options: Options(
+          headers: {
+            'X-Anonymous-Session-Id': await _anonymousSessionId(),
+          },
+        ),
       );
       return PassengerWaitSession.fromJson(response.data ?? const {});
     } catch (_) {
@@ -153,6 +168,11 @@ class TransitRepository {
     try {
       final response = await _dio.post<Map<String, dynamic>>(
         '/tracking/passenger-waits/$waitId/board',
+        options: Options(
+          headers: {
+            'X-Anonymous-Session-Id': await _anonymousSessionId(),
+          },
+        ),
       );
       return PassengerWaitSession.fromJson(response.data ?? const {});
     } catch (_) {
@@ -339,30 +359,6 @@ class RouteArrivalSnapshot {
     );
   }
 
-  factory RouteArrivalSnapshot.fallback() {
-    return RouteArrivalSnapshot(
-      selectedVehicle: sampleVehicles[0],
-      alternatives: const [],
-      skippedPassedVehicles: [sampleVehicles[1]],
-    );
-  }
+
 }
 
-const _fallbackRoutes = [
-  sampleRoute,
-  TransitRoute(
-    id: 'mansour',
-    nameAr: 'الباب الشرقي - المنصور',
-    routeType: RouteType.kia,
-    status: RouteStatus.active,
-    fareMin: 500,
-    fareMax: 1000,
-    operatingHoursStart: '٦:٣٠ ص',
-    operatingHoursEnd: '١١:٠٠ م',
-    confidenceScore: 82,
-    lastVerifiedAt: null,
-  ),
-];
-
-const _fallbackDetail =
-    TransitRouteDetail(route: sampleRoute, stops: sampleStops);

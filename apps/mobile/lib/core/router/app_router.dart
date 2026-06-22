@@ -57,7 +57,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/routes/:id',
         builder: (context, state) =>
-            RouteDetailScreen(routeId: state.pathParameters['id'] ?? 'sample'),
+            RouteDetailScreen(routeId: state.pathParameters['id'] ?? ''),
       ),
     ],
   );

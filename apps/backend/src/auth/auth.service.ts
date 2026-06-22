@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException } from "@nestjs/common";
+import { Injectable, UnauthorizedException, Inject } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { JwtService } from "@nestjs/jwt";
 import Redis from "ioredis";
@@ -6,17 +6,12 @@ import { UsersService } from "../users/users.service";
 
 @Injectable()
 export class AuthService {
-  private readonly redis: Redis;
-
   constructor(
     private readonly users: UsersService,
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
-  ) {
-    this.redis = new Redis(
-      this.config.get<string>("REDIS_URL", "redis://localhost:6379"),
-    );
-  }
+    @Inject("REDIS_CLIENT") private readonly redis: Redis,
+  ) {}
 
   async sendOtp(phone: string) {
     const otp = "123456";

@@ -1,5 +1,9 @@
+import 'dart:async';
 import 'package:dio/dio.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:socket_io_client/socket_io_client.dart' as IO;
 
 final apiBaseUrl = const String.fromEnvironment(
   'API_URL',
@@ -11,9 +15,14 @@ const _accessTokenKey = 'driver_access_token';
 const _refreshTokenKey = 'driver_refresh_token';
 const _phoneKey = 'driver_phone';
 
+final driverRepositoryProvider = Provider<DriverRepository>((ref) {
+  return DriverRepository();
+});
+
 class DriverRepository {
   DriverRepository()
-      : _dio = Dio(
+      : _secureStorage = const FlutterSecureStorage(),
+        _dio = Dio(
           BaseOptions(
             baseUrl: apiBaseUrl,
             connectTimeout: const Duration(seconds: 10),
@@ -23,8 +32,7 @@ class DriverRepository {
     _dio.interceptors.add(
       InterceptorsWrapper(
         onRequest: (options, handler) async {
-          final prefs = await SharedPreferences.getInstance();
-          final token = prefs.getString(_accessTokenKey);
+          final token = await _secureStorage.read(key: _accessTokenKey);
           if (token != null) {
             options.headers['Authorization'] = 'Bearer $token';
           }
@@ -36,8 +44,7 @@ class DriverRepository {
               handler.next(error);
               return;
             }
-            final prefs = await SharedPreferences.getInstance();
-            final refresh = prefs.getString(_refreshTokenKey);
+            final refresh = await _secureStorage.read(key: _refreshTokenKey);
             if (refresh != null) {
               try {
                 final refreshDio = Dio(BaseOptions(baseUrl: apiBaseUrl));
@@ -49,17 +56,23 @@ class DriverRepository {
                 final newAccess = data?['accessToken'] as String?;
                 final newRefresh = data?['refreshToken'] as String?;
                 if (newAccess != null && newRefresh != null) {
-                  await prefs.setString(_accessTokenKey, newAccess);
-                  await prefs.setString(_refreshTokenKey, newRefresh);
+                  await _secureStorage.write(key: _accessTokenKey, value: newAccess);
+                  await _secureStorage.write(key: _refreshTokenKey, value: newRefresh);
                   error.requestOptions.headers['Authorization'] = 'Bearer $newAccess';
+                  
+                  // If socket is connected, update its token too
+                  if (_socket != null && _socket!.connected) {
+                    _socket!.emit('token:update', {'token': newAccess});
+                  }
+ 
                   final retry = await _dio.fetch<dynamic>(error.requestOptions);
                   handler.resolve(retry);
                   return;
                 }
               } catch (_) {
-                await prefs.remove(_accessTokenKey);
-                await prefs.remove(_refreshTokenKey);
-                await prefs.remove(_phoneKey);
+                await _secureStorage.delete(key: _accessTokenKey);
+                await _secureStorage.delete(key: _refreshTokenKey);
+                await _secureStorage.delete(key: _phoneKey);
               }
             }
           }
@@ -69,13 +82,103 @@ class DriverRepository {
     );
   }
 
+  final FlutterSecureStorage _secureStorage;
   final Dio _dio;
+  IO.Socket? _socket;
+  Timer? _tokenRefreshTimer;
+
+  IO.Socket? get socket => _socket;
+
+  Future<void> connectSocket() async {
+    final token = await _secureStorage.read(key: _accessTokenKey);
+    if (token == null) return;
+    
+    if (_socket != null && _socket!.connected) return;
+
+    _socket = IO.io(
+      apiBaseUrl.replaceFirst('http', 'ws') + '/tracking',
+      IO.OptionBuilder()
+          .setTransports(['websocket'])
+          .setAuth({'token': token})
+          .enableAutoConnect()
+          .build(),
+    );
+
+    _socket!.onConnect((_) {
+      print('Socket.IO connected to tracking namespace');
+    });
+
+    _socket!.onDisconnect((_) {
+      print('Socket.IO disconnected');
+    });
+
+    _socket!.onConnectError((err) {
+      print('Socket.IO connection error: $err');
+    });
+
+    _startTokenRefreshTimer();
+  }
+
+  void disconnectSocket() {
+    _socket?.disconnect();
+    _socket = null;
+    _tokenRefreshTimer?.cancel();
+    _tokenRefreshTimer = null;
+  }
+
+  void sendLocationViaSocket({
+    required String vehicleId,
+    required double lat,
+    required double lng,
+    double? speedMetersPerSecond,
+  }) {
+    if (_socket == null || !_socket!.connected) {
+      print('Socket not connected, cannot send location');
+      return;
+    }
+    _socket!.emit('vehicle:location', {
+      'vehicleId': vehicleId,
+      'lat': lat,
+      'lng': lng,
+      if (speedMetersPerSecond != null) 'speedMetersPerSecond': speedMetersPerSecond,
+    });
+  }
+
+  void _startTokenRefreshTimer() {
+    _tokenRefreshTimer?.cancel();
+    _tokenRefreshTimer = Timer.periodic(const Duration(minutes: 5), (_) async {
+      final refresh = await _secureStorage.read(key: _refreshTokenKey);
+      if (refresh != null) {
+        try {
+          final refreshDio = Dio(BaseOptions(baseUrl: apiBaseUrl));
+          final response = await refreshDio.post<Map<String, dynamic>>(
+            '/auth/refresh',
+            data: {'refreshToken': refresh},
+          );
+          final data = response.data;
+          final newAccess = data?['accessToken'] as String?;
+          final newRefresh = data?['refreshToken'] as String?;
+          if (newAccess != null && newRefresh != null) {
+            await _secureStorage.write(key: _accessTokenKey, value: newAccess);
+            await _secureStorage.write(key: _refreshTokenKey, value: newRefresh);
+            _setAccessToken(newAccess);
+            
+            if (_socket != null && _socket!.connected) {
+              _socket!.emit('token:update', {'token': newAccess});
+              print('Socket token updated successfully');
+            }
+          }
+        } catch (e) {
+          print('Failed to refresh token in background: $e');
+        }
+      }
+    });
+  }
 
   Future<DriverSession?> loadSession() async {
-    final prefs = await SharedPreferences.getInstance();
-    final accessToken = prefs.getString(_accessTokenKey);
-    final refreshToken = prefs.getString(_refreshTokenKey);
-    final phone = prefs.getString(_phoneKey);
+    final accessToken = await _secureStorage.read(key: _accessTokenKey);
+    final refreshToken = await _secureStorage.read(key: _refreshTokenKey);
+    final phone = await _secureStorage.read(key: _phoneKey);
     if (accessToken == null || refreshToken == null || phone == null) {
       return null;
     }
@@ -128,18 +231,16 @@ class DriverRepository {
   }
 
   Future<void> saveSession(DriverSession session) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_accessTokenKey, session.accessToken);
-    await prefs.setString(_refreshTokenKey, session.refreshToken);
-    await prefs.setString(_phoneKey, session.phone);
+    await _secureStorage.write(key: _accessTokenKey, value: session.accessToken);
+    await _secureStorage.write(key: _refreshTokenKey, value: session.refreshToken);
+    await _secureStorage.write(key: _phoneKey, value: session.phone);
     _setAccessToken(session.accessToken);
   }
 
   Future<void> signOut() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_accessTokenKey);
-    await prefs.remove(_refreshTokenKey);
-    await prefs.remove(_phoneKey);
+    await _secureStorage.delete(key: _accessTokenKey);
+    await _secureStorage.delete(key: _refreshTokenKey);
+    await _secureStorage.delete(key: _phoneKey);
     _dio.options.headers.remove('Authorization');
   }
 

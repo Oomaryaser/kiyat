@@ -2,6 +2,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  Inject,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
@@ -31,8 +32,6 @@ export class TrackingService {
   private static readonly activeVehicleWindowMs = 45_000;
   private static readonly walkingRouteCacheTtlSeconds = 600;
 
-  private readonly redis: Redis;
-
   constructor(
     @InjectRepository(Vehicle) private readonly vehicles: Repository<Vehicle>,
     @InjectRepository(TransitRoute)
@@ -40,11 +39,8 @@ export class TrackingService {
     @InjectRepository(PassengerWait)
     private readonly passengerWaits: Repository<PassengerWait>,
     private readonly config: ConfigService,
-  ) {
-    this.redis = new Redis(
-      this.config.get<string>("REDIS_URL", "redis://localhost:6379"),
-    );
-  }
+    @Inject("REDIS_CLIENT") private readonly redis: Redis,
+  ) {}
 
   async updateVehicleLocation(payload: VehicleLocationPayload) {
     const vehicle = await this.vehicles.findOne({
@@ -285,9 +281,13 @@ export class TrackingService {
   async updatePassengerWaitLocation(
     waitId: string,
     dto: UpdatePassengerWaitDto,
+    anonymousSessionId?: string,
   ) {
     const wait = await this.passengerWaits.findOne({ where: { id: waitId } });
     if (!wait) throw new NotFoundException("Passenger wait not found");
+    if (!anonymousSessionId || wait.anonymousSessionId !== anonymousSessionId) {
+      throw new ForbiddenException("You do not own this wait session");
+    }
     if (wait.status !== PassengerWaitStatus.Waiting) return wait;
 
     const route = await this.routeWithStops(wait.routeId);
@@ -577,18 +577,24 @@ export class TrackingService {
     return this.passengerWaits.save(wait);
   }
 
-  async cancelPassengerWait(waitId: string) {
+  async cancelPassengerWait(waitId: string, anonymousSessionId?: string) {
     const wait = await this.passengerWaits.findOne({ where: { id: waitId } });
     if (!wait) throw new NotFoundException("Passenger wait not found");
+    if (!anonymousSessionId || wait.anonymousSessionId !== anonymousSessionId) {
+      throw new ForbiddenException("You do not own this wait session");
+    }
     if (wait.status === PassengerWaitStatus.Waiting) {
       wait.status = PassengerWaitStatus.Cancelled;
     }
     return this.passengerWaits.save(wait);
   }
 
-  async boardPassengerWait(waitId: string) {
+  async boardPassengerWait(waitId: string, anonymousSessionId?: string) {
     const wait = await this.passengerWaits.findOne({ where: { id: waitId } });
     if (!wait) throw new NotFoundException("Passenger wait not found");
+    if (!anonymousSessionId || wait.anonymousSessionId !== anonymousSessionId) {
+      throw new ForbiddenException("You do not own this wait session");
+    }
     if (wait.status === PassengerWaitStatus.Waiting) {
       wait.status = PassengerWaitStatus.Boarded;
       wait.boardedAt = new Date();

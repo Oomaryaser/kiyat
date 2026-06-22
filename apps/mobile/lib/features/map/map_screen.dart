@@ -58,7 +58,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       ),
       body: detailsAsync.when(
         data: (details) => _LiveRoutesMapBody(
-          details: details.isEmpty ? const [_fallbackMapDetail] : details,
+          details: details,
           selectedRouteId: _selectedRouteId,
           currentPosition: _currentPosition,
           locating: _locating,
@@ -69,16 +69,34 @@ class _MapScreenState extends ConsumerState<MapScreen> {
           onArrivalRequestChanged: (request) => _lastArrivalRequest = request,
         ),
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (_, __) => _LiveRoutesMapBody(
-          details: const [_fallbackMapDetail],
-          selectedRouteId: _selectedRouteId,
-          currentPosition: _currentPosition,
-          locating: _locating,
-          locationStatus: _locationStatus,
-          onSelectRoute: (routeId) =>
-              setState(() => _selectedRouteId = routeId),
-          onUseCurrentLocation: _useCurrentLocation,
-          onArrivalRequestChanged: (request) => _lastArrivalRequest = request,
+        error: (error, stack) => Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.wifi_off_rounded, size: 64, color: Colors.grey[400]),
+                const SizedBox(height: 16),
+                const Text(
+                  'فشل الاتصال بالخريطة الحية',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, fontFamily: 'Tajawal'),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'يرجى التحقق من اتصالك بالإنترنت والمحاولة مجدداً.',
+                  style: TextStyle(color: Colors.grey, fontFamily: 'Tajawal'),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 24),
+                ElevatedButton.icon(
+                  onPressed: () => ref.invalidate(routeDetailsProvider),
+                  icon: const Icon(Icons.refresh_rounded),
+                  label: const Text('إعادة المحاولة', style: TextStyle(fontFamily: 'Tajawal')),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -501,5 +519,4 @@ class _RouteMapChip extends StatelessWidget {
   }
 }
 
-const _fallbackMapDetail =
-    TransitRouteDetail(route: sampleRoute, stops: sampleStops);
+

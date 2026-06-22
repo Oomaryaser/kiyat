@@ -1,0 +1,12 @@
+name: shared_utils
+description: Common utilities and models shared between Kiyat Passenger and Driver apps.
+version: 0.1.0
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.2.0
+  geolocator: ">=13.0.0 <15.0.0"
