@@ -4,6 +4,9 @@ import { PaginationQueryDto } from '../common/dto/pagination.dto';
 import { CreateStopDto, NearbyStopsDto } from './stops.dto';
 import { StopsService } from './stops.service';
 import { OperatorAuthGuard } from '../auth/operator-auth.guard';
+import { Roles } from '../auth/roles.decorator';
+import { RolesGuard } from '../auth/roles.guard';
+import { UserRole } from '../common/enums/transit.enums';
 
 @ApiTags('stops')
 @Controller('stops')
@@ -21,7 +24,8 @@ export class StopsController {
   }
 
   @Post()
-  @UseGuards(OperatorAuthGuard)
+  @UseGuards(OperatorAuthGuard, RolesGuard)
+  @Roles(UserRole.Owner, UserRole.Admin)
   @ApiBearerAuth()
   create(@Body() dto: CreateStopDto) {
     return this.stops.create(dto);

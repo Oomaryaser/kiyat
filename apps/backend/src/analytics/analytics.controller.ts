@@ -1,28 +1,27 @@
-import { Controller, Get, Req, UseGuards, ForbiddenException } from '@nestjs/common';
+import { Controller, Get, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { OperatorAuthGuard, AuthenticatedOperatorRequest } from '../auth/operator-auth.guard';
+import { OperatorAuthGuard } from '../auth/operator-auth.guard';
+import { Roles } from '../auth/roles.decorator';
+import { RolesGuard } from '../auth/roles.guard';
 import { AnalyticsService } from './analytics.service';
 import { UserRole } from '../common/enums/transit.enums';
 
 @ApiTags('analytics')
 @Controller('analytics')
-@UseGuards(OperatorAuthGuard)
+@UseGuards(OperatorAuthGuard, RolesGuard)
 @ApiBearerAuth()
 export class AnalyticsController {
   constructor(private readonly analytics: AnalyticsService) {}
 
   @Get('overview')
-  overview(@Req() req: AuthenticatedOperatorRequest) {
-    // Both Owner, Admin, Operator, Support can view overview metrics
+  @Roles(UserRole.Owner, UserRole.Admin, UserRole.Operator, UserRole.Support)
+  overview() {
     return this.analytics.overview();
   }
 
   @Get('live-tracking')
-  liveTracking(@Req() req: AuthenticatedOperatorRequest) {
-    // Support role is forbidden from live tracking map details
-    if (req.user.role === UserRole.Support) {
-      throw new ForbiddenException("Access Denied: Support role cannot view live tracking map");
-    }
+  @Roles(UserRole.Owner, UserRole.Admin, UserRole.Operator)
+  liveTracking() {
     return this.analytics.liveTracking();
   }
 }

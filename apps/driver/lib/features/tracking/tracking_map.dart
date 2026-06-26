@@ -102,24 +102,6 @@ class DriverTrackingMap extends StatefulWidget {
 }
 
 class _DriverTrackingMapState extends State<DriverTrackingMap> {
-  static const _cleanMapStyle = '''
-[
-  {
-    "featureType": "poi",
-    "elementType": "labels.icon",
-    "stylers": [{ "visibility": "off" }]
-  },
-  {
-    "featureType": "poi.business",
-    "stylers": [{ "visibility": "off" }]
-  },
-  {
-    "transit.station": "labels.icon",
-    "stylers": [{ "visibility": "off" }]
-  }
-]
-''';
-
   GoogleMapController? controller;
   String? focusedWaitId;
   String? routeRequestKey;
@@ -335,8 +317,9 @@ class _DriverTrackingMapState extends State<DriverTrackingMap> {
               });
             },
             initialCameraPosition: CameraPosition(target: center, zoom: 14.8),
-            style: _cleanMapStyle,
             mapType: MapType.normal,
+            buildingsEnabled: true,
+            trafficEnabled: false,
             myLocationButtonEnabled: false,
             myLocationEnabled: false,
             compassEnabled: true,

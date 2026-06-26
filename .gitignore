@@ -1,5 +1,6 @@
 node_modules/
 dist/
+.next/
 .env
 .dart_tool/
 .flutter-plugins
@@ -8,4 +9,5 @@ build/
 .idea/
 .vscode/
 *.iml
+*.tsbuildinfo
 apps/mobile/ios/Flutter/Secrets.xcconfig

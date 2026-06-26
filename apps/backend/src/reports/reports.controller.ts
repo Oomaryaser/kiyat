@@ -4,6 +4,9 @@ import { CreateReportDto, ListReportsDto, ReviewReportDto } from './reports.dto'
 import { ReportsService } from './reports.service';
 import { JwtAuthGuard, AuthenticatedRequest } from '../auth/jwt-auth.guard';
 import { OperatorAuthGuard, AuthenticatedOperatorRequest } from '../auth/operator-auth.guard';
+import { Roles } from '../auth/roles.decorator';
+import { RolesGuard } from '../auth/roles.guard';
+import { UserRole } from '../common/enums/transit.enums';
 
 @ApiTags('reports')
 @Controller('reports')
@@ -18,14 +21,16 @@ export class ReportsController {
   }
 
   @Get()
-  @UseGuards(OperatorAuthGuard)
+  @UseGuards(OperatorAuthGuard, RolesGuard)
+  @Roles(UserRole.Owner, UserRole.Admin, UserRole.Support)
   @ApiBearerAuth()
   list(@Query() query: ListReportsDto) {
     return this.reports.list(query);
   }
 
   @Patch(':id')
-  @UseGuards(OperatorAuthGuard)
+  @UseGuards(OperatorAuthGuard, RolesGuard)
+  @Roles(UserRole.Owner, UserRole.Admin, UserRole.Support)
   @ApiBearerAuth()
   review(@Param('id') id: string, @Body() dto: ReviewReportDto, @Req() req: AuthenticatedOperatorRequest) {
     return this.reports.review(id, { ...dto, reviewedById: req.user.sub });

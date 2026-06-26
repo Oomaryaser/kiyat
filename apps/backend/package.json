@@ -8,6 +8,7 @@
     "build": "nest build",
     "lint": "eslint \"src/**/*.ts\"",
     "seed": "ts-node -r tsconfig-paths/register src/database/seeds/baghdad.seed.ts",
+    "seed:admin": "ts-node -r tsconfig-paths/register src/database/seeds/admin-roles.seed.ts",
     "typeorm": "typeorm-ts-node-commonjs -d src/database/data-source.ts",
     "migration:generate": "npm run typeorm migration:generate src/database/migrations/InitialSchema",
     "migration:run": "npm run typeorm migration:run",

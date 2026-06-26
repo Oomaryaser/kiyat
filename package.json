@@ -4,11 +4,16 @@
   "private": true,
   "workspaces": [
     "apps/backend",
+    "apps/admin",
     "packages/shared-types"
   ],
   "scripts": {
     "backend:dev": "npm --workspace @kiyat/backend run start:dev",
     "backend:build": "npm --workspace @kiyat/backend run build",
-    "backend:seed": "npm --workspace @kiyat/backend run seed"
+    "backend:seed": "npm --workspace @kiyat/backend run seed",
+    "backend:seed:admin": "npm --workspace @kiyat/backend run seed:admin",
+    "admin:dev": "npm --workspace @kiyat/admin run dev",
+    "admin:build": "npm --workspace @kiyat/admin run build",
+    "admin:start": "npm --workspace @kiyat/admin run start"
   }
 }

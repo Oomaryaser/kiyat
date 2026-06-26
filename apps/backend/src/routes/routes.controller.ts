@@ -1,8 +1,10 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards, ForbiddenException } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CreateRouteDto, ListRoutesDto, NearbyRoutesDto, SearchRoutesDto } from './routes.dto';
 import { RoutesService } from './routes.service';
-import { OperatorAuthGuard, AuthenticatedOperatorRequest } from '../auth/operator-auth.guard';
+import { OperatorAuthGuard } from '../auth/operator-auth.guard';
+import { Roles } from '../auth/roles.decorator';
+import { RolesGuard } from '../auth/roles.guard';
 import { UserRole } from '../common/enums/transit.enums';
 
 @ApiTags('routes')
@@ -31,22 +33,18 @@ export class RoutesController {
   }
 
   @Post()
-  @UseGuards(OperatorAuthGuard)
+  @UseGuards(OperatorAuthGuard, RolesGuard)
+  @Roles(UserRole.Owner, UserRole.Admin)
   @ApiBearerAuth()
-  create(@Body() dto: CreateRouteDto, @Req() req: AuthenticatedOperatorRequest) {
-    if (req.user.role !== UserRole.Owner && req.user.role !== UserRole.Admin) {
-      throw new ForbiddenException("Access Denied: Only Owner or Admin can manage routes");
-    }
+  create(@Body() dto: CreateRouteDto) {
     return this.routes.create(dto);
   }
 
   @Patch(':id')
-  @UseGuards(OperatorAuthGuard)
+  @UseGuards(OperatorAuthGuard, RolesGuard)
+  @Roles(UserRole.Owner, UserRole.Admin)
   @ApiBearerAuth()
-  update(@Param('id') id: string, @Body() dto: Partial<CreateRouteDto>, @Req() req: AuthenticatedOperatorRequest) {
-    if (req.user.role !== UserRole.Owner && req.user.role !== UserRole.Admin) {
-      throw new ForbiddenException("Access Denied: Only Owner or Admin can manage routes");
-    }
+  update(@Param('id') id: string, @Body() dto: Partial<CreateRouteDto>) {
     return this.routes.update(id, dto);
   }
 }
