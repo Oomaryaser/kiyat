@@ -1,7 +1,7 @@
 import 'reflect-metadata';
 import { DataSource } from 'typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { RouteStatus, RouteType, StopType, PassengerWaitStatus } from '../../common/enums/transit.enums';
+import { RouteStatus, RouteType, StopType, PassengerWaitStatus, UserRole } from '../../common/enums/transit.enums';
 import { TransitRoute } from '../../routes/route.entity';
 import { RouteStop } from '../../routes/route-stop.entity';
 import { Stop } from '../../stops/stop.entity';
@@ -23,52 +23,31 @@ const dataSource = new DataSource({
 
 const routes = [
   {
-    nameAr: 'الباب الشرقي - الكاظمية',
-    nameEn: 'Bab Al-Sharqi - Kadhimiya',
+    nameAr: 'اختبار شمال بغداد - الكاظمية',
+    nameEn: 'Test North Baghdad - Kadhimiya',
     stops: [
-      ['الباب الشرقي', 'Bab Al-Sharqi', 33.3152, 44.4161, 'قرب ساحة التحرير'],
-      ['الصالحية', 'Al-Salihiya', 33.3236, 44.3959, 'قرب مبنى الإذاعة والتلفزيون'],
-      ['العطيفية', 'Al-Atifiya', 33.3601, 44.3656, 'قرب الجسر'],
-      ['الكاظمية', 'Kadhimiya', 33.3792, 44.3384, 'قرب الروضة الكاظمية'],
+      ['الكاظمية', 'Kadhimiya', 33.3792, 44.3384, 'بداية خط الاختبار الشمالي'],
+      ['العطيفية', 'Al-Atifiya', 33.3601, 44.3656, 'نقطة وسطية شمالية'],
+      ['الوزيرية', 'Al-Waziriyah', 33.3565, 44.3927, 'نهاية خط الاختبار الشمالي'],
     ],
   },
   {
-    nameAr: 'الباب الشرقي - المنصور',
-    nameEn: 'Bab Al-Sharqi - Mansour',
+    nameAr: 'اختبار جنوب بغداد - الزعفرانية',
+    nameEn: 'Test South Baghdad - Zafaraniya',
     stops: [
-      ['الباب الشرقي', 'Bab Al-Sharqi', 33.3152, 44.4161, 'قرب ساحة التحرير'],
-      ['كرادة مريم', 'Karradat Maryam', 33.3127, 44.3928, 'قرب المنطقة الخضراء'],
-      ['الحارثية', 'Al-Harthiya', 33.3165, 44.3578, 'قرب مول المنصور'],
-      ['المنصور', 'Al-Mansour', 33.3159, 44.3447, 'شارع 14 رمضان'],
+      ['الزعفرانية', 'Zafaraniya', 33.2357, 44.4929, 'بداية خط الاختبار الجنوبي'],
+      ['جسر ديالى', 'Diyala Bridge', 33.2528, 44.5361, 'نقطة وسطية جنوبية'],
+      ['بسماية', 'Bismayah', 33.1810, 44.6065, 'نهاية خط الاختبار الجنوبي'],
     ],
   },
   {
-    nameAr: 'الكرادة - الجادرية',
-    nameEn: 'Karrada - Jadriya',
+    nameAr: 'بغداد الجديدة - النهضة',
+    nameEn: 'New Baghdad - Al-Nahdha',
     stops: [
-      ['كرادة داخل', 'Karrada Dakhil', 33.3017, 44.4342, 'قرب شارع العطار'],
-      ['الجامعة التكنولوجية', 'University of Technology', 33.3133, 44.4334, 'قرب الجامعة التكنولوجية'],
-      ['الجادرية', 'Jadriya', 33.2739, 44.3775, 'قرب جامعة بغداد'],
-    ],
-  },
-  {
-    nameAr: 'الشعب - الباب المعظم',
-    nameEn: 'Al-Shaab - Bab Al-Muadham',
-    stops: [
-      ['الشعب', 'Al-Shaab', 33.3909, 44.4551, 'قرب سوق الشعب'],
-      ['حي تونس', 'Tunis District', 33.3714, 44.4244, 'قرب شارع فلسطين'],
-      ['الوزيرية', 'Al-Waziriyah', 33.3565, 44.3927, 'قرب الجامعة المستنصرية'],
-      ['الباب المعظم', 'Bab Al-Muadham', 33.3498, 44.3817, 'قرب وزارة الصحة'],
-    ],
-  },
-  {
-    nameAr: 'مدينة الصدر - ساحة الطيران',
-    nameEn: 'Sadr City - Al-Tayaran Square',
-    stops: [
-      ['مدينة الصدر', 'Sadr City', 33.3684, 44.5087, 'قرب سوق مريدي'],
-      ['جميلة', 'Jamila', 33.3542, 44.4781, 'قرب علوة جميلة'],
+      ['بغداد الجديدة', 'New Baghdad', 33.3009, 44.4927, 'بداية الخط قرب بغداد الجديدة'],
+      ['شارع فلسطين', 'Palestine Street', 33.3238, 44.4569, 'نقطة وسطية على الطريق'],
       ['ساحة بيروت', 'Beirut Square', 33.3362, 44.4442, 'قرب قناة الجيش'],
-      ['ساحة الطيران', 'Al-Tayaran Square', 33.3185, 44.4221, 'قرب النصب'],
+      ['النهضة', 'Al-Nahdha', 33.3446, 44.4224, 'نهاية الخط قرب النهضة'],
     ],
   },
 ];
@@ -80,6 +59,33 @@ async function seed() {
   const routeStopRepo = dataSource.getRepository(RouteStop);
   const vehicleRepo = dataSource.getRepository(Vehicle);
   const passengerWaitRepo = dataSource.getRepository(PassengerWait);
+  const userRepo = dataSource.getRepository(User);
+
+  await dataSource.query('TRUNCATE TABLE routes RESTART IDENTITY CASCADE');
+  await dataSource.query('TRUNCATE TABLE users RESTART IDENTITY CASCADE');
+
+  // Seed default operator users
+  await userRepo.save(
+    userRepo.create({
+      phone: '07701234567',
+      role: UserRole.Owner,
+      nameAr: 'مالك كيات',
+    }),
+  );
+  await userRepo.save(
+    userRepo.create({
+      phone: '07711112222',
+      role: UserRole.Operator,
+      nameAr: 'مشغل كيات',
+    }),
+  );
+  await userRepo.save(
+    userRepo.create({
+      phone: '07722223333',
+      role: UserRole.Support,
+      nameAr: 'دعم كيات',
+    }),
+  );
 
   for (const routeData of routes) {
     const route = await routeRepo.save(
@@ -154,7 +160,7 @@ async function seed() {
   }
 
   await dataSource.destroy();
-  console.log('Seeded 5 Baghdad Kia routes');
+  console.log(`Seeded ${routes.length} test Kia routes`);
 }
 
 void seed().catch((error) => {

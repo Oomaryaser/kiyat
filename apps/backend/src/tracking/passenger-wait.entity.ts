@@ -1,8 +1,10 @@
-import { Column, CreateDateColumn, Entity, JoinColumn, ManyToOne, PrimaryGeneratedColumn, UpdateDateColumn } from 'typeorm';
+import { Column, CreateDateColumn, Entity, Index, JoinColumn, ManyToOne, PrimaryGeneratedColumn, UpdateDateColumn } from 'typeorm';
 import { PassengerWaitStatus } from '../common/enums/transit.enums';
 import { TransitRoute } from '../routes/route.entity';
 
 @Entity('passenger_waits')
+@Index(['status', 'updatedAt'])
+@Index(['routeId', 'status', 'updatedAt'])
 export class PassengerWait {
   @PrimaryGeneratedColumn('uuid')
   id!: string;

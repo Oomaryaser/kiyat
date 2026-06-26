@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from '../auth/auth.module';
+import { RedisModule } from '../common/redis/redis.module';
 import { TransitRoute } from '../routes/route.entity';
 import { PassengerWait } from '../tracking/passenger-wait.entity';
 import { Vehicle } from '../tracking/vehicle.entity';
@@ -11,6 +12,7 @@ import { AnalyticsService } from './analytics.service';
 @Module({
   imports: [
     AuthModule,
+    RedisModule,
     TypeOrmModule.forFeature([PassengerWait, Vehicle, TripRating, TransitRoute]),
   ],
   controllers: [AnalyticsController],

@@ -48,4 +48,12 @@ export class TripRatingsService {
         : null,
     };
   }
+
+  listAll() {
+    return this.tripRatings.find({
+      relations: ['route', 'passenger'],
+      order: { createdAt: 'DESC' },
+      take: 50,
+    });
+  }
 }

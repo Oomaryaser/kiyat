@@ -45,7 +45,9 @@ export class OperatorAuthGuard implements CanActivate {
       });
       if (
         payload.role !== UserRole.Operator &&
-        payload.role !== UserRole.Admin
+        payload.role !== UserRole.Admin &&
+        payload.role !== UserRole.Owner &&
+        payload.role !== UserRole.Support
       ) {
         throw new ForbiddenException("Operator role required");
       }

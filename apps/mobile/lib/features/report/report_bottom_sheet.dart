@@ -79,7 +79,7 @@ class _ReportBottomSheetState extends ConsumerState<ReportBottomSheet> {
           ),
           const SizedBox(height: 14),
           DropdownButtonFormField<String>(
-            value: type,
+            initialValue: type,
             decoration: const InputDecoration(
               prefixIcon: Icon(Icons.category_outlined),
               labelText: 'نوع البلاغ',

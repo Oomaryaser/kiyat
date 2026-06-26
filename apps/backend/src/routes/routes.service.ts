@@ -4,10 +4,17 @@ import { Brackets, Repository } from 'typeorm';
 import { PaginatedResponse } from '../common/dto/pagination.dto';
 import { CreateRouteDto, ListRoutesDto, NearbyRoutesDto, SearchRoutesDto } from './routes.dto';
 import { TransitRoute } from './route.entity';
+import { Stop } from '../stops/stop.entity';
+import { RouteStop } from './route-stop.entity';
+import { StopType } from '../common/enums/transit.enums';
 
 @Injectable()
 export class RoutesService {
-  constructor(@InjectRepository(TransitRoute) private readonly routes: Repository<TransitRoute>) {}
+  constructor(
+    @InjectRepository(TransitRoute) private readonly routes: Repository<TransitRoute>,
+    @InjectRepository(Stop) private readonly stops: Repository<Stop>,
+    @InjectRepository(RouteStop) private readonly routeStops: Repository<RouteStop>,
+  ) {}
 
   async list(query: ListRoutesDto): Promise<PaginatedResponse<TransitRoute>> {
     const qb = this.routes.createQueryBuilder('route');
@@ -70,20 +77,78 @@ export class RoutesService {
     return { data, total, page: query.page, limit: query.limit };
   }
 
-  create(dto: CreateRouteDto) {
-    return this.routes.save(
+  async create(dto: CreateRouteDto) {
+    const { stops, ...routeData } = dto;
+    const route = await this.routes.save(
       this.routes.create({
-        ...dto,
+        ...routeData,
         lastVerifiedAt: dto.lastVerifiedAt ? new Date(dto.lastVerifiedAt) : null,
       }),
     );
+
+    if (stops && stops.length > 0) {
+      for (const [index, s] of stops.entries()) {
+        const stop = await this.stops.save(
+          this.stops.create({
+            nameAr: s.nameAr,
+            nameEn: s.nameEn,
+            landmarkAr: s.nameAr,
+            stopType: s.isMajor ? StopType.Fixed : StopType.Approximate,
+            location: { type: 'Point', coordinates: [s.lng, s.lat] },
+          })
+        );
+        await this.routeStops.save(
+          this.routeStops.create({
+            routeId: route.id,
+            stopId: stop.id,
+            stopSequence: index + 1,
+            isMajor: s.isMajor ?? false,
+          })
+        );
+      }
+    }
+    return this.detail(route.id);
   }
 
   async update(id: string, dto: Partial<CreateRouteDto>) {
-    await this.routes.update(id, {
-      ...dto,
+    const route = await this.routes.findOne({ where: { id } });
+    if (!route) throw new NotFoundException('Route not found');
+
+    const { stops, ...routeData } = dto;
+
+    await this.routes.save({
+      ...route,
+      ...routeData,
       lastVerifiedAt: dto.lastVerifiedAt ? new Date(dto.lastVerifiedAt) : undefined,
     });
+
+    if (stops !== undefined) {
+      // Clear old route stops
+      await this.routeStops.delete({ routeId: id });
+
+      if (stops && stops.length > 0) {
+        for (const [index, s] of stops.entries()) {
+          const stop = await this.stops.save(
+            this.stops.create({
+              nameAr: s.nameAr,
+              nameEn: s.nameEn,
+              landmarkAr: s.nameAr,
+              stopType: s.isMajor ? StopType.Fixed : StopType.Approximate,
+              location: { type: 'Point', coordinates: [s.lng, s.lat] },
+            })
+          );
+          await this.routeStops.save(
+            this.routeStops.create({
+              routeId: id,
+              stopId: stop.id,
+              stopSequence: index + 1,
+              isMajor: s.isMajor ?? false,
+            })
+          );
+        }
+      }
+    }
+
     return this.detail(id);
   }
 }

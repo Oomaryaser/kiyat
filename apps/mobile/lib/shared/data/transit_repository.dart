@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -21,10 +23,15 @@ final routeDetailProvider =
 final routeDetailsProvider =
     FutureProvider<List<TransitRouteDetail>>((ref) async {
   final repository = ref.watch(transitRepositoryProvider);
-  final routes = await repository.listRoutes();
-  final details = await Future.wait(
-    routes.map((route) => repository.routeDetail(route.id)),
-  );
+  final routes = await repository.listRoutes(limit: 40);
+  final activeRouteId = await repository.loadActiveWaitRouteId();
+  final savedRouteIds = await repository.loadSavedRouteIds();
+  final priorityIds = <String>{
+    if (activeRouteId != null) activeRouteId,
+    ...savedRouteIds,
+    ...routes.take(8).map((route) => route.id),
+  };
+  final details = await repository.routeDetails(priorityIds.toList());
   final seen = <String>{};
   return details.where((detail) {
     if (detail.stops.isEmpty || seen.contains(detail.route.id)) return false;
@@ -48,14 +55,48 @@ final savedRouteIdsProvider = FutureProvider<Set<String>>((ref) async {
 });
 
 class TransitRepository {
-  const TransitRepository(this._dio);
+  TransitRepository(this._dio);
 
   final Dio _dio;
+  final Map<String, TransitRouteDetail> _detailMemoryCache = {};
+  List<TransitRoute>? _routesMemoryCache;
+  DateTime? _routesMemoryCachedAt;
 
-  Future<List<TransitRoute>> listRoutes() async {
+  static const _routesCacheKey = 'cache_routes_v1';
+  static const _routesCacheSavedAtKey = 'cache_routes_v1_saved_at';
+  static const _routeDetailCachePrefix = 'cache_route_detail_v1_';
+  static const _routeDetailSavedAtPrefix = 'cache_route_detail_v1_saved_at_';
+  static const _freshCacheTtl = Duration(minutes: 5);
+  static const _staleCacheTtl = Duration(days: 7);
+
+  Future<List<TransitRoute>> listRoutes(
+      {int limit = 40, bool forceRefresh = false}) async {
+    final now = DateTime.now();
+    if (!forceRefresh &&
+        _routesMemoryCache != null &&
+        _routesMemoryCachedAt != null &&
+        now.difference(_routesMemoryCachedAt!) < _freshCacheTtl) {
+      return _routesMemoryCache!;
+    }
+
+    if (!forceRefresh) {
+      final cached = await _loadCachedRoutes(maxAge: _freshCacheTtl);
+      if (cached.isNotEmpty) {
+        _routesMemoryCache = cached;
+        _routesMemoryCachedAt = now;
+        return cached;
+      }
+    }
+
     try {
-      final response = await _dio.get<Map<String, dynamic>>('/routes');
-      final data = response.data?['data'] as List<dynamic>? ?? const [];
+      final response = await _retry(
+        () => _dio.get<Map<String, dynamic>>(
+          '/routes',
+          queryParameters: {'limit': limit},
+        ),
+      );
+      final raw = response.data ?? const <String, dynamic>{};
+      final data = raw['data'] as List<dynamic>? ?? const [];
       final routes = data
           .whereType<Map<String, dynamic>>()
           .map(TransitRoute.fromJson)
@@ -63,35 +104,83 @@ class TransitRepository {
       if (routes.isEmpty) {
         throw Exception('No routes found');
       }
+      await _saveRoutesCache(raw);
+      _routesMemoryCache = routes;
+      _routesMemoryCachedAt = now;
       return routes;
     } catch (_) {
+      final cached = await _loadCachedRoutes(maxAge: _staleCacheTtl);
+      if (cached.isNotEmpty) return cached;
       rethrow;
     }
   }
 
-  Future<TransitRouteDetail> routeDetail(String routeId) async {
+  Future<TransitRouteDetail> routeDetail(String routeId,
+      {bool forceRefresh = false}) async {
+    if (!forceRefresh && _detailMemoryCache.containsKey(routeId)) {
+      return _detailMemoryCache[routeId]!;
+    }
+
+    if (!forceRefresh) {
+      final cached =
+          await _loadCachedRouteDetail(routeId, maxAge: _freshCacheTtl);
+      if (cached != null) {
+        _detailMemoryCache[routeId] = cached;
+        return cached;
+      }
+    }
+
     try {
-      final response = await _dio.get<Map<String, dynamic>>('/routes/$routeId');
-      final detail = TransitRouteDetail.fromJson(response.data ?? const {});
+      final response = await _retry(
+        () => _dio.get<Map<String, dynamic>>('/routes/$routeId'),
+      );
+      final raw = response.data ?? const <String, dynamic>{};
+      final detail = TransitRouteDetail.fromJson(raw);
       if (detail.stops.isEmpty) {
         throw Exception('Route has no path anchors');
       }
+      await _saveRouteDetailCache(routeId, raw);
+      _detailMemoryCache[routeId] = detail;
       return detail;
     } catch (_) {
+      final cached =
+          await _loadCachedRouteDetail(routeId, maxAge: _staleCacheTtl);
+      if (cached != null) return cached;
       rethrow;
     }
+  }
+
+  Future<List<TransitRouteDetail>> routeDetails(List<String> routeIds) async {
+    final details = <TransitRouteDetail>[];
+    const batchSize = 3;
+    for (var index = 0; index < routeIds.length; index += batchSize) {
+      final batch = routeIds.skip(index).take(batchSize);
+      final batchResults = await Future.wait(
+        batch.map((id) async {
+          try {
+            return await routeDetail(id);
+          } catch (_) {
+            return null;
+          }
+        }),
+      );
+      details.addAll(batchResults.whereType<TransitRouteDetail>());
+    }
+    return details;
   }
 
   Future<RouteArrivalSnapshot> routeArrival(RouteArrivalRequest request) async {
     try {
-      final response = await _dio.get<Map<String, dynamic>>(
-        '/tracking/routes/${request.routeId}/arrival',
-        queryParameters: {
-          'lat': request.lat,
-          'lng': request.lng,
-          if (request.pickupStopId != null)
-            'pickupStopId': request.pickupStopId,
-        },
+      final response = await _retry(
+        () => _dio.get<Map<String, dynamic>>(
+          '/tracking/routes/${request.routeId}/arrival',
+          queryParameters: {
+            'lat': request.lat,
+            'lng': request.lng,
+            if (request.pickupStopId != null)
+              'pickupStopId': request.pickupStopId,
+          },
+        ),
       );
       return RouteArrivalSnapshot.fromJson(response.data ?? const {});
     } catch (_) {
@@ -269,6 +358,23 @@ class TransitRepository {
     await prefs.setStringList('saved_route_ids', ids.toList()..sort());
   }
 
+  Future<void> clearRouteCaches() async {
+    final prefs = await SharedPreferences.getInstance();
+    _routesMemoryCache = null;
+    _routesMemoryCachedAt = null;
+    _detailMemoryCache.clear();
+    final keys = prefs.getKeys().where(
+          (key) =>
+              key == _routesCacheKey ||
+              key == _routesCacheSavedAtKey ||
+              key.startsWith(_routeDetailCachePrefix) ||
+              key.startsWith(_routeDetailSavedAtPrefix),
+        );
+    for (final key in keys.toList()) {
+      await prefs.remove(key);
+    }
+  }
+
   Future<String> _anonymousSessionId() async {
     final prefs = await SharedPreferences.getInstance();
     final existing = prefs.getString('anonymous_session_id');
@@ -276,6 +382,86 @@ class TransitRepository {
     final generated = 'passenger-${DateTime.now().microsecondsSinceEpoch}';
     await prefs.setString('anonymous_session_id', generated);
     return generated;
+  }
+
+  Future<Response<T>> _retry<T>(Future<Response<T>> Function() request) async {
+    try {
+      return await request();
+    } on DioException catch (error) {
+      final status = error.response?.statusCode ?? 0;
+      final canRetry =
+          status == 0 || status == 408 || status == 429 || status >= 500;
+      if (!canRetry) rethrow;
+      await Future<void>.delayed(const Duration(milliseconds: 350));
+      return request();
+    }
+  }
+
+  Future<void> _saveRoutesCache(Map<String, dynamic> raw) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+        _routesCacheSavedAtKey, DateTime.now().toIso8601String());
+    await prefs.setString(_routesCacheKey, _encodeJson(raw));
+  }
+
+  Future<List<TransitRoute>> _loadCachedRoutes(
+      {required Duration maxAge}) async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedAt =
+        DateTime.tryParse(prefs.getString(_routesCacheSavedAtKey) ?? '');
+    final raw = prefs.getString(_routesCacheKey);
+    if (savedAt == null ||
+        raw == null ||
+        DateTime.now().difference(savedAt) > maxAge) {
+      return const [];
+    }
+    final json = _decodeJson(raw);
+    final data = json?['data'] as List<dynamic>? ?? const [];
+    return data
+        .whereType<Map<String, dynamic>>()
+        .map(TransitRoute.fromJson)
+        .where((route) => route.id.isNotEmpty)
+        .toList();
+  }
+
+  Future<void> _saveRouteDetailCache(
+      String routeId, Map<String, dynamic> raw) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('$_routeDetailCachePrefix$routeId', _encodeJson(raw));
+    await prefs.setString(
+      '$_routeDetailSavedAtPrefix$routeId',
+      DateTime.now().toIso8601String(),
+    );
+  }
+
+  Future<TransitRouteDetail?> _loadCachedRouteDetail(
+    String routeId, {
+    required Duration maxAge,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedAt = DateTime.tryParse(
+      prefs.getString('$_routeDetailSavedAtPrefix$routeId') ?? '',
+    );
+    final raw = prefs.getString('$_routeDetailCachePrefix$routeId');
+    if (savedAt == null ||
+        raw == null ||
+        DateTime.now().difference(savedAt) > maxAge) {
+      return null;
+    }
+    final json = _decodeJson(raw);
+    if (json == null) return null;
+    final detail = TransitRouteDetail.fromJson(json);
+    return detail.stops.isEmpty ? null : detail;
+  }
+
+  String _encodeJson(Map<String, dynamic> value) => jsonEncode(value);
+
+  Map<String, dynamic>? _decodeJson(String value) {
+    try {
+      return Map<String, dynamic>.from(jsonDecode(value) as Map);
+    } catch (_) {
+      return null;
+    }
   }
 }
 
@@ -308,20 +494,24 @@ class RouteArrivalRequest {
   final double lng;
   final String? pickupStopId;
 
+  int get _latBucket => (lat * 100000).round();
+  int get _lngBucket => (lng * 100000).round();
+
   @override
   bool operator ==(Object other) {
     return other is RouteArrivalRequest &&
         other.routeId == routeId &&
-        other.lat == lat &&
-        other.lng == lng &&
+        other._latBucket == _latBucket &&
+        other._lngBucket == _lngBucket &&
         other.pickupStopId == pickupStopId;
   }
 
   @override
-  int get hashCode => Object.hash(routeId, lat, lng, pickupStopId);
+  int get hashCode =>
+      Object.hash(routeId, _latBucket, _lngBucket, pickupStopId);
 
   @override
-  String toString() => '$routeId:$lat:$lng:$pickupStopId';
+  String toString() => '$routeId:$_latBucket:$_lngBucket:$pickupStopId';
 }
 
 class RouteArrivalSnapshot {
@@ -358,7 +548,4 @@ class RouteArrivalSnapshot {
           .toList(),
     );
   }
-
-
 }
-

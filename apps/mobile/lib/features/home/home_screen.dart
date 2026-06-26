@@ -106,7 +106,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           activeRouteId: null,
           searchQuery: searchQuery,
           currentPosition: currentPosition,
-          locationMessage: 'ما قدرنا نتصل بالخادم. يرجى التحقق من اتصالك بالإنترنت.',
+          locationMessage:
+              'ما قدرنا نتصل بالخادم. يرجى التحقق من اتصالك بالإنترنت.',
           onSearchChanged: (value) => setState(() => searchQuery = value),
           onUseCurrentLocation: _loadCurrentPosition,
           onRefresh: _refreshHome,
@@ -137,6 +138,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   Future<void> _refreshHome() async {
+    await ref.read(transitRepositoryProvider).clearRouteCaches();
     ref.invalidate(routeDetailsProvider);
     ref.invalidate(activeWaitRouteIdProvider);
     await _loadCurrentPosition();
@@ -205,10 +207,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         lat: position.latitude,
         lng: position.longitude,
         accuracyMeters: position.accuracy,
-        speedMetersPerSecond:
-            position.speed.isFinite && position.speed >= 0
-                ? position.speed
-                : null,
+        speedMetersPerSecond: position.speed.isFinite && position.speed >= 0
+            ? position.speed
+            : null,
       );
       if (!mounted) return;
       if (session == null) {
@@ -361,15 +362,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         return StatefulBuilder(
           builder: (context, setSheetState) {
             Future<void> submit() async {
-              final success = await ref.read(transitRepositoryProvider).submitTripRating(
-                    routeId: routeId,
-                    passengerWaitId: waitId,
-                    rating: rating,
-                    crowdingLevel: crowding,
-                    priceFair: priceFair,
-                    cleanlinessRating: cleanliness,
-                    comment: commentController.text,
-                  );
+              final success =
+                  await ref.read(transitRepositoryProvider).submitTripRating(
+                        routeId: routeId,
+                        passengerWaitId: waitId,
+                        rating: rating,
+                        crowdingLevel: crowding,
+                        priceFair: priceFair,
+                        cleanlinessRating: cleanliness,
+                        comment: commentController.text,
+                      );
               if (!context.mounted) return;
               Navigator.pop(context);
               ScaffoldMessenger.of(context).showSnackBar(
@@ -394,7 +396,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Text('كيف كانت الكية؟', style: Theme.of(context).textTheme.titleLarge),
+                  Text('كيف كانت الكية؟',
+                      style: Theme.of(context).textTheme.titleLarge),
                   const SizedBox(height: 12),
                   _RatingStars(
                     value: rating,
@@ -417,7 +420,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     contentPadding: EdgeInsets.zero,
                     title: const Text('السعر كان مناسب'),
                     value: priceFair,
-                    onChanged: (value) => setSheetState(() => priceFair = value),
+                    onChanged: (value) =>
+                        setSheetState(() => priceFair = value),
                   ),
                   Row(
                     children: [
@@ -425,7 +429,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       _RatingStars(
                         value: cleanliness,
                         compact: true,
-                        onChanged: (value) => setSheetState(() => cleanliness = value),
+                        onChanged: (value) =>
+                            setSheetState(() => cleanliness = value),
                       ),
                     ],
                   ),
@@ -581,7 +586,7 @@ class _PassengerHomeDashboard extends ConsumerWidget {
       children: [
         Positioned.fill(
           child: _PassengerHomeMap(
-            details: details.take(4).toList(),
+            details: visibleDetails,
             currentPosition: currentPosition,
           ),
         ),
@@ -644,24 +649,26 @@ class _PassengerHomeDashboard extends ConsumerWidget {
           }).toList();
     final sorted = [...filtered];
     sorted.sort((a, b) {
-      final aDistance = _distanceToRoute(a) ?? double.infinity;
-      final bDistance = _distanceToRoute(b) ?? double.infinity;
+      final aDistance = _routeApproach(a)?.distanceMeters ?? double.infinity;
+      final bDistance = _routeApproach(b)?.distanceMeters ?? double.infinity;
       return aDistance.compareTo(bDistance);
     });
+    if (currentPosition != null) {
+      return sorted.where((detail) {
+        final approach = _routeApproach(detail);
+        return approach != null && approach.distanceMeters <= 500;
+      }).toList();
+    }
     return sorted;
   }
 
-  double? _distanceToRoute(TransitRouteDetail detail) {
+  _RouteApproach? _routeApproach(TransitRouteDetail detail) {
     final position = currentPosition;
     if (position == null || detail.stops.isEmpty) return null;
-    return detail.stops
-        .map((stop) => Geolocator.distanceBetween(
-              position.latitude,
-              position.longitude,
-              stop.lat,
-              stop.lng,
-            ))
-        .reduce((a, b) => a < b ? a : b);
+    return _nearestRouteApproach(
+      detail,
+      LatLng(position.latitude, position.longitude),
+    );
   }
 
   LatLng _pickupAnchor(TransitRouteDetail detail) {
@@ -725,7 +732,8 @@ class _ActiveWaitingHome extends StatelessWidget {
 
     final pickupDistance = _pickupDistanceMeters();
     final walkingMinutes = (pickupDistance / 70).clamp(1, 8).ceil();
-    final showWalkingNavigation = pickupDistance > 30 && currentPosition != null;
+    final showWalkingNavigation =
+        pickupDistance > 30 && currentPosition != null;
 
     return Stack(
       children: [
@@ -746,7 +754,9 @@ class _ActiveWaitingHome extends StatelessWidget {
               children: [
                 if (showWalkingNavigation) ...[
                   _WalkingNavigationBanner(
-                    stopName: detail.stops.isNotEmpty ? detail.stops.first.nameAr : 'الموقف الأول',
+                    stopName: detail.stops.isNotEmpty
+                        ? detail.stops.first.nameAr
+                        : 'الموقف الأول',
                     distanceMeters: pickupDistance,
                     walkingMinutes: walkingMinutes,
                   ),
@@ -1091,7 +1101,8 @@ class _WaitingOperationsSheet extends StatelessWidget {
                     side: BorderSide(
                       color: const Color(0xFFB42318).withValues(alpha: 0.18),
                     ),
-                    backgroundColor: const Color(0xFFFFF1F0).withValues(alpha: 0.72),
+                    backgroundColor:
+                        const Color(0xFFFFF1F0).withValues(alpha: 0.72),
                     minimumSize: const Size.fromHeight(50),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(18),
@@ -1135,11 +1146,14 @@ class _PassengerHomeMap extends StatefulWidget {
 }
 
 class _PassengerHomeMapState extends State<_PassengerHomeMap> {
-  final Map<String, List<LatLng>> _roadPaths = {};
+  static final Map<String, List<LatLng>> _sharedRoadPaths = {};
+  final Map<String, List<LatLng>> _roadPaths = Map.of(_sharedRoadPaths);
   List<LatLng> _walkingPath = [];
+  int? _walkingDistanceMeters;
   GoogleMapController? _mapController;
   bool _navigationModeActive = true;
   bool _mapInitialized = false;
+  BitmapDescriptor? _walkerArrowIcon;
 
   static const _mapStyle = '''
 [
@@ -1159,6 +1173,7 @@ class _PassengerHomeMapState extends State<_PassengerHomeMap> {
   @override
   void initState() {
     super.initState();
+    _loadWalkerArrowIcon();
     _loadRoadPaths();
     _loadWalkingPath();
   }
@@ -1172,9 +1187,12 @@ class _PassengerHomeMapState extends State<_PassengerHomeMap> {
 
     final oldUser = oldWidget.currentPosition;
     final nextUser = widget.currentPosition;
-    final userMoved = oldUser?.latitude != nextUser?.latitude || oldUser?.longitude != nextUser?.longitude;
+    final userMoved = oldUser?.latitude != nextUser?.latitude ||
+        oldUser?.longitude != nextUser?.longitude;
 
-    if (widget.isWaitingMode != oldWidget.isWaitingMode || userMoved || oldIds != nextIds) {
+    if (widget.isWaitingMode != oldWidget.isWaitingMode ||
+        userMoved ||
+        oldIds != nextIds) {
       _loadWalkingPath();
     }
   }
@@ -1187,6 +1205,7 @@ class _PassengerHomeMapState extends State<_PassengerHomeMap> {
       if (_walkingPath.isNotEmpty) {
         setState(() {
           _walkingPath = [];
+          _walkingDistanceMeters = null;
         });
       }
       return;
@@ -1197,11 +1216,13 @@ class _PassengerHomeMapState extends State<_PassengerHomeMap> {
     final stopLat = widget.pickupLat ?? widget.details.first.stops.first.lat;
     final stopLng = widget.pickupLng ?? widget.details.first.stops.first.lng;
 
-    final distance = Geolocator.distanceBetween(userLat, userLng, stopLat, stopLng);
+    final distance =
+        Geolocator.distanceBetween(userLat, userLng, stopLat, stopLng);
     if (distance <= 30) {
       if (_walkingPath.isNotEmpty) {
         setState(() {
           _walkingPath = [];
+          _walkingDistanceMeters = null;
         });
       }
       return;
@@ -1217,8 +1238,10 @@ class _PassengerHomeMapState extends State<_PassengerHomeMap> {
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
         final routes = data['routes'] as List<dynamic>? ?? const [];
-        final geometry = routes.firstOrNull?['geometry'] as Map<String, dynamic>?;
-        final coordinates = geometry?['coordinates'] as List<dynamic>? ?? const [];
+        final geometry =
+            routes.firstOrNull?['geometry'] as Map<String, dynamic>?;
+        final coordinates =
+            geometry?['coordinates'] as List<dynamic>? ?? const [];
         final points = coordinates
             .whereType<List<dynamic>>()
             .where((point) => point.length >= 2)
@@ -1231,6 +1254,7 @@ class _PassengerHomeMapState extends State<_PassengerHomeMap> {
         if (mounted) {
           setState(() {
             _walkingPath = points;
+            _walkingDistanceMeters = distance.round();
           });
           _animateCameraToNavigation();
         }
@@ -1238,6 +1262,7 @@ class _PassengerHomeMapState extends State<_PassengerHomeMap> {
         if (mounted) {
           setState(() {
             _walkingPath = [LatLng(userLat, userLng), LatLng(stopLat, stopLng)];
+            _walkingDistanceMeters = distance.round();
           });
           _animateCameraToNavigation();
         }
@@ -1246,6 +1271,7 @@ class _PassengerHomeMapState extends State<_PassengerHomeMap> {
       if (mounted) {
         setState(() {
           _walkingPath = [LatLng(userLat, userLng), LatLng(stopLat, stopLng)];
+          _walkingDistanceMeters = distance.round();
         });
         _animateCameraToNavigation();
       }
@@ -1268,7 +1294,8 @@ class _PassengerHomeMapState extends State<_PassengerHomeMap> {
     final stopLat = widget.pickupLat ?? widget.details.first.stops.first.lat;
     final stopLng = widget.pickupLng ?? widget.details.first.stops.first.lng;
 
-    double bearing = Geolocator.bearingBetween(userLat, userLng, stopLat, stopLng);
+    double bearing =
+        Geolocator.bearingBetween(userLat, userLng, stopLat, stopLng);
 
     _mapController!.animateCamera(
       CameraUpdate.newCameraPosition(
@@ -1301,6 +1328,8 @@ class _PassengerHomeMapState extends State<_PassengerHomeMap> {
             const Color(0xFFFF8A00),
             const Color(0xFF16A34A),
           ];
+    final walkerArrowIcon = _walkerArrowIcon;
+    final walkerBearing = _walkerBearing();
 
     return Stack(
       children: [
@@ -1328,7 +1357,9 @@ class _PassengerHomeMapState extends State<_PassengerHomeMap> {
             },
             onCameraMoveStarted: () {
               if (!_mapInitialized) return;
-              if (widget.isWaitingMode && _walkingPath.isNotEmpty && _navigationModeActive) {
+              if (widget.isWaitingMode &&
+                  _walkingPath.isNotEmpty &&
+                  _navigationModeActive) {
                 setState(() {
                   _navigationModeActive = false;
                 });
@@ -1343,22 +1374,32 @@ class _PassengerHomeMapState extends State<_PassengerHomeMap> {
                         widget.details[index].stops
                             .map((stop) => LatLng(stop.lat, stop.lng))
                             .toList(),
-                    color: colors[index % colors.length],
-                    width: widget.isWaitingMode ? 8 : 6,
+                    color: widget.isWaitingMode
+                        ? const Color(0xFF155E75).withValues(alpha: 0.32)
+                        : colors[index % colors.length],
+                    width: widget.isWaitingMode ? 4 : 6,
                     zIndex: 2 + index,
                   ),
-              if (widget.isWaitingMode && _walkingPath.isNotEmpty)
+              if (widget.isWaitingMode && _walkingPath.isNotEmpty) ...[
+                Polyline(
+                  polylineId: const PolylineId('home_walking_route_shadow'),
+                  points: _walkingPath,
+                  color: Colors.white.withValues(alpha: 0.92),
+                  width: 10,
+                  zIndex: 98,
+                ),
                 Polyline(
                   polylineId: const PolylineId('home_walking_route'),
                   points: _walkingPath,
-                  color: const Color(0xFF16A34A),
-                  width: 5,
+                  color: const Color(0xFF16A34A).withValues(alpha: 0.92),
+                  width: 6,
                   patterns: [
-                    PatternItem.dash(12),
+                    PatternItem.dash(22),
                     PatternItem.gap(8),
                   ],
                   zIndex: 99,
                 ),
+              ],
             },
             markers: {
               for (var index = 0; index < widget.details.length; index += 1)
@@ -1369,9 +1410,24 @@ class _PassengerHomeMapState extends State<_PassengerHomeMap> {
                     icon: BitmapDescriptor.defaultMarkerWithHue(
                       _markerHue(index),
                     ),
-                    infoWindow: InfoWindow(title: widget.details[index].route.nameAr),
+                    infoWindow:
+                        InfoWindow(title: widget.details[index].route.nameAr),
                   ),
-              if (widget.currentPosition != null)
+              if (widget.currentPosition != null && walkerArrowIcon != null)
+                Marker(
+                  markerId: const MarkerId('home_walker_direction'),
+                  position: LatLng(
+                    widget.currentPosition!.latitude,
+                    widget.currentPosition!.longitude,
+                  ),
+                  icon: walkerArrowIcon,
+                  anchor: const Offset(0.5, 0.5),
+                  rotation: walkerBearing,
+                  flat: true,
+                  zIndexInt: 140,
+                  infoWindow: const InfoWindow(title: 'أنت هنا - بداية المشي'),
+                ),
+              if (widget.currentPosition != null && walkerArrowIcon == null)
                 Marker(
                   markerId: const MarkerId('home_user_location'),
                   position: LatLng(
@@ -1379,8 +1435,8 @@ class _PassengerHomeMapState extends State<_PassengerHomeMap> {
                     widget.currentPosition!.longitude,
                   ),
                   icon: BitmapDescriptor.defaultMarkerWithHue(
-                      BitmapDescriptor.hueGreen),
-                  infoWindow: const InfoWindow(title: 'موقعك'),
+                      BitmapDescriptor.hueAzure),
+                  infoWindow: const InfoWindow(title: 'أنت هنا - بداية المشي'),
                 ),
               if (widget.isWaitingMode &&
                   widget.details.isNotEmpty &&
@@ -1392,10 +1448,10 @@ class _PassengerHomeMapState extends State<_PassengerHomeMap> {
                     widget.pickupLng ?? widget.details.first.stops.first.lng,
                   ),
                   icon: BitmapDescriptor.defaultMarkerWithHue(
-                      BitmapDescriptor.hueBlue),
+                      BitmapDescriptor.hueGreen),
                   infoWindow: InfoWindow(
-                    title: 'موقف الصعود: ${widget.details.first.stops.first.nameAr}',
-                    snippet: widget.details.first.stops.first.landmarkAr,
+                    title: 'نهاية المشي: نقطة الصعود',
+                    snippet: widget.details.first.stops.first.nameAr,
                   ),
                 ),
               for (var index = 0; index < widget.vehicles.length; index += 1)
@@ -1418,7 +1474,9 @@ class _PassengerHomeMapState extends State<_PassengerHomeMap> {
             },
           ),
         ),
-        if (widget.isWaitingMode && _walkingPath.isNotEmpty && !_navigationModeActive)
+        if (widget.isWaitingMode &&
+            _walkingPath.isNotEmpty &&
+            !_navigationModeActive)
           PositionedDirectional(
             start: 18,
             bottom: 176,
@@ -1429,6 +1487,28 @@ class _PassengerHomeMapState extends State<_PassengerHomeMap> {
                 });
                 _animateCameraToNavigation();
               },
+            ),
+          ),
+        if (widget.isWaitingMode && _walkingPath.isNotEmpty)
+          PositionedDirectional(
+            start: 18,
+            top: MediaQuery.of(context).padding.top + 132,
+            child: TweenAnimationBuilder<double>(
+              tween: Tween(begin: 0, end: 1),
+              duration: const Duration(milliseconds: 280),
+              curve: Curves.easeOutCubic,
+              builder: (context, value, child) {
+                return Opacity(
+                  opacity: value,
+                  child: Transform.translate(
+                    offset: Offset(0, (1 - value) * 8),
+                    child: child,
+                  ),
+                );
+              },
+              child: _WalkingModeBadge(
+                distanceMeters: _walkingDistanceMeters,
+              ),
             ),
           ),
       ],
@@ -1453,6 +1533,7 @@ class _PassengerHomeMapState extends State<_PassengerHomeMap> {
         final response =
             await http.get(uri).timeout(const Duration(seconds: 6));
         if (response.statusCode != 200) {
+          _sharedRoadPaths[detail.route.id] = fallback;
           if (!mounted) return;
           setState(() => _roadPaths[detail.route.id] = fallback);
           continue;
@@ -1471,14 +1552,86 @@ class _PassengerHomeMapState extends State<_PassengerHomeMap> {
                   (point[0] as num).toDouble(),
                 ))
             .toList();
+        final nextPath = points.length > 1 ? points : fallback;
+        _sharedRoadPaths[detail.route.id] = nextPath;
         if (!mounted) return;
-        setState(() => _roadPaths[detail.route.id] =
-            points.length > 1 ? points : fallback);
+        setState(() => _roadPaths[detail.route.id] = nextPath);
       } catch (_) {
+        _sharedRoadPaths[detail.route.id] = fallback;
         if (!mounted) return;
         setState(() => _roadPaths[detail.route.id] = fallback);
       }
     }
+  }
+
+  Future<void> _loadWalkerArrowIcon() async {
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    const size = 64.0;
+    final center = Offset(size / 2, size / 2);
+
+    final shadowPaint = Paint()
+      ..color = Colors.black.withValues(alpha: 0.18)
+      ..maskFilter = const ui.MaskFilter.blur(ui.BlurStyle.normal, 7);
+    final whitePaint = Paint()..color = Colors.white;
+    final greenPaint = Paint()..color = const Color(0xFF16A34A);
+
+    final shadowPath = Path()
+      ..moveTo(center.dx, 6)
+      ..lineTo(size - 9, size - 8)
+      ..lineTo(center.dx, size - 23)
+      ..lineTo(9, size - 8)
+      ..close();
+    canvas.drawPath(shadowPath.shift(const Offset(0, 3)), shadowPaint);
+
+    final outlinePath = Path()
+      ..moveTo(center.dx, 5)
+      ..lineTo(size - 7, size - 7)
+      ..lineTo(center.dx, size - 22)
+      ..lineTo(7, size - 7)
+      ..close();
+    canvas.drawPath(outlinePath, whitePaint);
+
+    final arrowPath = Path()
+      ..moveTo(center.dx, 12)
+      ..lineTo(size - 18, size - 17)
+      ..lineTo(center.dx, size - 30)
+      ..lineTo(18, size - 17)
+      ..close();
+    canvas.drawPath(arrowPath, greenPaint);
+
+    canvas.drawCircle(center, 6, whitePaint);
+    canvas.drawCircle(center, 3.8, greenPaint);
+
+    final picture = recorder.endRecording();
+    final image = await picture.toImage(size.toInt(), size.toInt());
+    final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+    if (!mounted || bytes == null) return;
+    setState(() {
+      _walkerArrowIcon = BitmapDescriptor.bytes(
+        bytes.buffer.asUint8List(),
+      );
+    });
+  }
+
+  double _walkerBearing() {
+    final position = widget.currentPosition;
+    if (position == null) return 0;
+    final start = LatLng(position.latitude, position.longitude);
+    final target = _walkingPath.length > 1
+        ? _walkingPath[1]
+        : widget.details.isNotEmpty && widget.details.first.stops.isNotEmpty
+            ? LatLng(
+                widget.pickupLat ?? widget.details.first.stops.first.lat,
+                widget.pickupLng ?? widget.details.first.stops.first.lng,
+              )
+            : start;
+    return Geolocator.bearingBetween(
+      start.latitude,
+      start.longitude,
+      target.latitude,
+      target.longitude,
+    );
   }
 
   LatLng _markerPoint(TransitRouteDetail detail, int index) {
@@ -1537,6 +1690,78 @@ class _ReCenterButton extends StatelessWidget {
   }
 }
 
+class _WalkingModeBadge extends StatelessWidget {
+  const _WalkingModeBadge({required this.distanceMeters});
+
+  final int? distanceMeters;
+
+  @override
+  Widget build(BuildContext context) {
+    final distance = distanceMeters == null
+        ? null
+        : distanceMeters! < 1000
+            ? '${distanceMeters!} م'
+            : '${(distanceMeters! / 1000).toStringAsFixed(1)} كم';
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xFF16A34A),
+        borderRadius: BorderRadius.circular(999),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF14532D).withValues(alpha: 0.28),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.directions_walk_rounded,
+              color: Colors.white,
+              size: 22,
+            ),
+            const SizedBox(width: 8),
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'وضع المشي',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    height: 1,
+                    fontWeight: FontWeight.w900,
+                    fontFamily: 'Tajawal',
+                  ),
+                ),
+                if (distance != null) ...[
+                  const SizedBox(height: 3),
+                  Text(
+                    'اتبع الخط الأخضر • $distance',
+                    style: const TextStyle(
+                      color: Color(0xFFE6F8EA),
+                      fontSize: 10.5,
+                      height: 1,
+                      fontWeight: FontWeight.w800,
+                      fontFamily: 'Tajawal',
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _NotificationButton extends StatelessWidget {
   const _NotificationButton({required this.onTap});
 
@@ -1565,11 +1790,41 @@ class _NotificationButton extends StatelessWidget {
   }
 }
 
-class _HomeSearchPill extends StatelessWidget {
+class _HomeSearchPill extends StatefulWidget {
   const _HomeSearchPill({required this.value, required this.onChanged});
 
   final String value;
   final ValueChanged<String> onChanged;
+
+  @override
+  State<_HomeSearchPill> createState() => _HomeSearchPillState();
+}
+
+class _HomeSearchPillState extends State<_HomeSearchPill> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.value);
+  }
+
+  @override
+  void didUpdateWidget(covariant _HomeSearchPill oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.value != _controller.text) {
+      _controller.value = TextEditingValue(
+        text: widget.value,
+        selection: TextSelection.collapsed(offset: widget.value.length),
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1579,9 +1834,8 @@ class _HomeSearchPill extends StatelessWidget {
         height: 54,
         child: TextField(
           textAlign: TextAlign.right,
-          controller: TextEditingController(text: value)
-            ..selection = TextSelection.collapsed(offset: value.length),
-          onChanged: onChanged,
+          controller: _controller,
+          onChanged: widget.onChanged,
           decoration: InputDecoration(
             hintText: 'إلى أين تريد الذهاب؟',
             hintStyle: TextStyle(
@@ -1589,10 +1843,10 @@ class _HomeSearchPill extends StatelessWidget {
               fontSize: 15,
               fontWeight: FontWeight.w800,
             ),
-            prefixIcon: value.isEmpty
+            prefixIcon: widget.value.isEmpty
                 ? null
                 : IconButton(
-                    onPressed: () => onChanged(''),
+                    onPressed: () => widget.onChanged(''),
                     icon: const Icon(Icons.close),
                   ),
             suffixIcon: const Icon(Icons.search_rounded, size: 30),
@@ -1713,6 +1967,114 @@ class _MapLocateButton extends StatelessWidget {
   }
 }
 
+enum _ApproachTargetType { stop, routePoint }
+
+class _RouteApproach {
+  const _RouteApproach({
+    required this.point,
+    required this.distanceMeters,
+    required this.type,
+    this.stop,
+  });
+
+  final LatLng point;
+  final double distanceMeters;
+  final _ApproachTargetType type;
+  final TransitStop? stop;
+
+  bool get isStop => type == _ApproachTargetType.stop && stop != null;
+
+  String get title {
+    if (isStop) return 'روح لمحطة ${stop!.nameAr}';
+    return 'روح لأقرب نقطة على الخط';
+  }
+
+  String get subtitle {
+    final meters = distanceMeters.round();
+    if (isStop) {
+      return 'المحطة تبعد تقريباً $meters م وهي مناسبة للصعود.';
+    }
+    return 'النقطة تبعد تقريباً $meters م حتى الكية تكدر توقف عليك.';
+  }
+}
+
+_RouteApproach? _nearestRouteApproach(
+  TransitRouteDetail detail,
+  LatLng userPoint,
+) {
+  if (detail.stops.isEmpty) return null;
+
+  TransitStop? nearestStop;
+  var nearestStopDistance = double.infinity;
+  for (final stop in detail.stops) {
+    final distance = Geolocator.distanceBetween(
+      userPoint.latitude,
+      userPoint.longitude,
+      stop.lat,
+      stop.lng,
+    );
+    if (distance < nearestStopDistance) {
+      nearestStopDistance = distance;
+      nearestStop = stop;
+    }
+  }
+
+  if (nearestStop != null && nearestStopDistance <= 80) {
+    return _RouteApproach(
+      point: LatLng(nearestStop.lat, nearestStop.lng),
+      distanceMeters: nearestStopDistance,
+      type: _ApproachTargetType.stop,
+      stop: nearestStop,
+    );
+  }
+
+  var nearestRoutePoint =
+      LatLng(detail.stops.first.lat, detail.stops.first.lng);
+  var nearestRouteDistance = double.infinity;
+  if (detail.stops.length == 1) {
+    nearestRouteDistance = nearestStopDistance;
+  } else {
+    for (var index = 0; index < detail.stops.length - 1; index += 1) {
+      final projected = _projectPointToRouteSegment(
+        userPoint,
+        LatLng(detail.stops[index].lat, detail.stops[index].lng),
+        LatLng(detail.stops[index + 1].lat, detail.stops[index + 1].lng),
+      );
+      final distance = Geolocator.distanceBetween(
+        userPoint.latitude,
+        userPoint.longitude,
+        projected.latitude,
+        projected.longitude,
+      );
+      if (distance < nearestRouteDistance) {
+        nearestRouteDistance = distance;
+        nearestRoutePoint = projected;
+      }
+    }
+  }
+
+  return _RouteApproach(
+    point: nearestRoutePoint,
+    distanceMeters: nearestRouteDistance,
+    type: _ApproachTargetType.routePoint,
+  );
+}
+
+LatLng _projectPointToRouteSegment(LatLng point, LatLng start, LatLng end) {
+  final x = point.longitude;
+  final y = point.latitude;
+  final x1 = start.longitude;
+  final y1 = start.latitude;
+  final x2 = end.longitude;
+  final y2 = end.latitude;
+  final dx = x2 - x1;
+  final dy = y2 - y1;
+  final lenSq = dx * dx + dy * dy;
+  var t = lenSq == 0 ? 0.0 : ((x - x1) * dx + (y - y1) * dy) / lenSq;
+  t = t.clamp(0.0, 1.0);
+  return LatLng(y1 + dy * t, x1 + dx * t);
+}
+
 class _RoundMapButton extends StatelessWidget {
   const _RoundMapButton({required this.icon, required this.onTap});
 
@@ -1815,7 +2177,7 @@ class _NearbyRoutesSheet extends StatelessWidget {
   }
 
   int _etaFor(int index, TransitRouteDetail detail) {
-    final distance = _distanceToRoute(detail);
+    final distance = _routeApproach(detail)?.distanceMeters;
     if (distance != null) {
       // Base walking time (approx 80m/min) + base waiting buffer of 5 minutes
       final walkingMinutes = (distance / 80).round();
@@ -1839,17 +2201,13 @@ class _NearbyRoutesSheet extends StatelessWidget {
     return 'ثقة متوسطة';
   }
 
-  double? _distanceToRoute(TransitRouteDetail detail) {
+  _RouteApproach? _routeApproach(TransitRouteDetail detail) {
     final position = currentPosition;
     if (position == null || detail.stops.isEmpty) return null;
-    return detail.stops
-        .map((stop) => Geolocator.distanceBetween(
-              position.latitude,
-              position.longitude,
-              stop.lat,
-              stop.lng,
-            ))
-        .reduce((a, b) => a < b ? a : b);
+    return _nearestRouteApproach(
+      detail,
+      LatLng(position.latitude, position.longitude),
+    );
   }
 }
 
@@ -1937,14 +2295,25 @@ class _MobilityRecommendationModule extends ConsumerWidget {
     final parts = route.nameAr.split(RegExp(r'\s*[-–—]\s*'));
     final origin = parts.isNotEmpty ? parts.first : route.nameAr;
     final destination = parts.length > 1 ? parts.last : _lastStopName;
+    final userPoint = currentPosition == null
+        ? null
+        : LatLng(currentPosition!.latitude, currentPosition!.longitude);
+    final approach =
+        userPoint == null ? null : _nearestRouteApproach(detail, userPoint);
+    final approachPoint = approach?.point;
 
     // Construct route arrival request
-    final lat = currentPosition?.latitude ?? (detail.stops.isNotEmpty ? detail.stops.first.lat : 0.0);
-    final lng = currentPosition?.longitude ?? (detail.stops.isNotEmpty ? detail.stops.first.lng : 0.0);
+    final lat = approachPoint?.latitude ??
+        currentPosition?.latitude ??
+        (detail.stops.isNotEmpty ? detail.stops.first.lat : 0.0);
+    final lng = approachPoint?.longitude ??
+        currentPosition?.longitude ??
+        (detail.stops.isNotEmpty ? detail.stops.first.lng : 0.0);
     final request = RouteArrivalRequest(
       routeId: route.id,
       lat: lat,
       lng: lng,
+      pickupStopId: approach?.isStop == true ? approach!.stop!.id : null,
     );
 
     final arrivalAsync = ref.watch(routeArrivalProvider(request));
@@ -2009,13 +2378,28 @@ class _MobilityRecommendationModule extends ConsumerWidget {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        'حسب قربك وحركة الخط الآن',
+                        approach?.title ?? 'حسب قربك وحركة الخط الآن',
                         style: TextStyle(
-                          color: Colors.grey.shade600,
+                          color:
+                              approach == null ? Colors.grey.shade600 : accent,
                           fontSize: 12,
-                          fontWeight: FontWeight.w700,
+                          fontWeight: FontWeight.w800,
                         ),
                       ),
+                      if (approach != null) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          approach.subtitle,
+                          textAlign: TextAlign.right,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: Colors.grey.shade700,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -2031,7 +2415,9 @@ class _MobilityRecommendationModule extends ConsumerWidget {
                         Text(
                           isLive ? '$displayEta' : '~$displayEta',
                           style: TextStyle(
-                            color: isLive ? const Color(0xFF17A34A) : const Color(0xFF071827),
+                            color: isLive
+                                ? const Color(0xFF17A34A)
+                                : const Color(0xFF071827),
                             fontSize: 27,
                             height: 0.9,
                             fontWeight: FontWeight.w900,
@@ -2095,7 +2481,9 @@ class _MobilityRecommendationModule extends ConsumerWidget {
                     return _SignalPill(
                       label: isLive ? 'تتبع حي نشط' : 'وقت تقديري',
                       icon: isLive ? Icons.sensors : Icons.access_time,
-                      color: isLive ? const Color(0xFF17A34A) : Colors.grey.shade600,
+                      color: isLive
+                          ? const Color(0xFF17A34A)
+                          : Colors.grey.shade600,
                     );
                   },
                   orElse: () => _SignalPill(
@@ -2103,6 +2491,14 @@ class _MobilityRecommendationModule extends ConsumerWidget {
                     icon: Icons.access_time,
                     color: Colors.grey.shade600,
                   ),
+                ),
+                _SignalPill(
+                  label:
+                      approach?.isStop == true ? 'محطة صعود' : 'نقطة على الخط',
+                  icon: approach?.isStop == true
+                      ? Icons.location_on_rounded
+                      : Icons.add_road_rounded,
+                  color: const Color(0xFF16A34A),
                 ),
                 _SignalPill(
                   label: confidence,

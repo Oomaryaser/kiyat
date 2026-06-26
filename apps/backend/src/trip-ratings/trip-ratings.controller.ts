@@ -23,4 +23,11 @@ export class TripRatingsController {
   routeSummary(@Param('routeId') routeId: string) {
     return this.tripRatings.routeSummary(routeId);
   }
+
+  @Get()
+  @UseGuards(OperatorAuthGuard)
+  @ApiBearerAuth()
+  listAll() {
+    return this.tripRatings.listAll();
+  }
 }

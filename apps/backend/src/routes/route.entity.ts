@@ -1,8 +1,9 @@
-import { Column, CreateDateColumn, Entity, OneToMany, PrimaryGeneratedColumn, UpdateDateColumn } from 'typeorm';
+import { Column, CreateDateColumn, Entity, Index, OneToMany, PrimaryGeneratedColumn, UpdateDateColumn } from 'typeorm';
 import { RouteStatus, RouteType } from '../common/enums/transit.enums';
 import { RouteStop } from './route-stop.entity';
 
 @Entity('routes')
+@Index(['status'])
 export class TransitRoute {
   @PrimaryGeneratedColumn('uuid')
   id!: string;

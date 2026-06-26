@@ -1,5 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import Redis from 'ioredis';
 import { Repository } from 'typeorm';
 import { PassengerWaitStatus } from '../common/enums/transit.enums';
 import { TransitRoute } from '../routes/route.entity';
@@ -18,6 +19,7 @@ export class AnalyticsService {
     private readonly tripRatings: Repository<TripRating>,
     @InjectRepository(TransitRoute)
     private readonly routes: Repository<TransitRoute>,
+    @Inject('REDIS_CLIENT') private readonly redis: Redis,
   ) {}
 
   async overview() {
@@ -76,6 +78,103 @@ export class AnalyticsService {
         routeNameAr: route.routeNameAr,
         waitCount: Number(route.waitCount),
       })),
+    };
+  }
+
+  async liveTracking() {
+    // 1. Fetch active vehicles (active in last 5 minutes)
+    const rawVehicles = await this.vehicles
+      .createQueryBuilder('vehicle')
+      .leftJoinAndSelect('vehicle.route', 'route')
+      .leftJoinAndSelect('vehicle.operator', 'operator')
+      .where('vehicle.is_tracking_active = true')
+      .andWhere("vehicle.last_seen_at > NOW() - INTERVAL '5 minutes'")
+      .getMany();
+
+    // Map active vehicles in parallel fetching heading from Redis
+    const vehicles = await Promise.all(
+      rawVehicles.map(async (v) => {
+        const bearingRaw = await this.redis.get(`vehicle:${v.id}:bearing`);
+        const heading = bearingRaw ? parseInt(bearingRaw, 10) : 0;
+        return {
+          id: v.id,
+          driverName: v.operator?.nameAr || 'سائق كية',
+          routeId: v.routeId,
+          routeName: v.route?.nameAr || 'خط غير معروف',
+          lat: v.lastLocation?.coordinates[1] ?? 0.0,
+          lng: v.lastLocation?.coordinates[0] ?? 0.0,
+          lastSeenAt: v.lastSeenAt ? v.lastSeenAt.toISOString() : null,
+          speed: v.speedMetersPerSecond ?? 0.0,
+          heading,
+        };
+      })
+    );
+
+    // 2. Fetch active passenger waits (waiting in last 15 minutes)
+    const rawWaits = await this.passengerWaits
+      .createQueryBuilder('wait')
+      .leftJoinAndSelect('wait.route', 'route')
+      .where('wait.status = :status', { status: PassengerWaitStatus.Waiting })
+      .andWhere("wait.updated_at > NOW() - INTERVAL '15 minutes'")
+      .getMany();
+
+    // Group and aggregate passenger waits to protect privacy (3 decimals ~100m)
+    const zonesMap = new Map<string, {
+      routeId: string;
+      routeName: string;
+      lat: number;
+      lng: number;
+      updatedAt: Date;
+      count: number;
+    }>();
+
+    for (const w of rawWaits) {
+      const rawLat = w.lastLocation?.coordinates[1] ?? 0.0;
+      const rawLng = w.lastLocation?.coordinates[0] ?? 0.0;
+      const roundedLat = Math.round(rawLat * 1000) / 1000;
+      const roundedLng = Math.round(rawLng * 1000) / 1000;
+
+      const key = `${roundedLat},${roundedLng},${w.routeId}`;
+      const existing = zonesMap.get(key);
+      if (existing) {
+        existing.count += 1;
+        if (w.updatedAt > existing.updatedAt) {
+          existing.updatedAt = w.updatedAt;
+        }
+      } else {
+        zonesMap.set(key, {
+          routeId: w.routeId,
+          routeName: w.route?.nameAr || 'خط غير معروف',
+          lat: roundedLat,
+          lng: roundedLng,
+          updatedAt: w.updatedAt,
+          count: 1,
+        });
+      }
+    }
+
+    const passengerWaits = Array.from(zonesMap.entries()).map(([key, z], idx) => ({
+      id: `zone-${idx + 1}`,
+      routeId: z.routeId,
+      routeName: z.routeName,
+      lat: z.lat,
+      lng: z.lng,
+      updatedAt: z.updatedAt.toISOString(),
+      count: z.count,
+    }));
+
+    // 3. Create summary metrics
+    const summary = {
+      activeVehicles: vehicles.length,
+      waitingPassengers: rawWaits.length,
+      passengerZones: passengerWaits.length,
+      updatedAt: new Date().toISOString(),
+    };
+
+    return {
+      vehicles,
+      passengerWaits,
+      summary,
     };
   }
 }

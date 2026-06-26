@@ -105,61 +105,48 @@ class SettingsScreen extends ConsumerWidget {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('مظهر التطبيق'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              title: const Text('تلقائي حسب الجهاز'),
-              leading: Radio<ThemeMode>(
-                value: ThemeMode.system,
-                groupValue: ref.watch(themeModeProvider),
-                onChanged: (mode) {
-                  if (mode != null) {
-                    ref.read(themeModeProvider.notifier).setThemeMode(mode);
-                    Navigator.pop(context);
-                  }
+        content: RadioGroup<ThemeMode>(
+          groupValue: ref.watch(themeModeProvider),
+          onChanged: (mode) {
+            if (mode == null) return;
+            ref.read(themeModeProvider.notifier).setThemeMode(mode);
+            Navigator.pop(context);
+          },
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                title: const Text('تلقائي حسب الجهاز'),
+                leading: const Radio<ThemeMode>(value: ThemeMode.system),
+                onTap: () {
+                  ref
+                      .read(themeModeProvider.notifier)
+                      .setThemeMode(ThemeMode.system);
+                  Navigator.pop(context);
                 },
               ),
-              onTap: () {
-                ref.read(themeModeProvider.notifier).setThemeMode(ThemeMode.system);
-                Navigator.pop(context);
-              },
-            ),
-            ListTile(
-              title: const Text('فاتح'),
-              leading: Radio<ThemeMode>(
-                value: ThemeMode.light,
-                groupValue: ref.watch(themeModeProvider),
-                onChanged: (mode) {
-                  if (mode != null) {
-                    ref.read(themeModeProvider.notifier).setThemeMode(mode);
-                    Navigator.pop(context);
-                  }
+              ListTile(
+                title: const Text('فاتح'),
+                leading: const Radio<ThemeMode>(value: ThemeMode.light),
+                onTap: () {
+                  ref
+                      .read(themeModeProvider.notifier)
+                      .setThemeMode(ThemeMode.light);
+                  Navigator.pop(context);
                 },
               ),
-              onTap: () {
-                ref.read(themeModeProvider.notifier).setThemeMode(ThemeMode.light);
-                Navigator.pop(context);
-              },
-            ),
-            ListTile(
-              title: const Text('داكن'),
-              leading: Radio<ThemeMode>(
-                value: ThemeMode.dark,
-                groupValue: ref.watch(themeModeProvider),
-                onChanged: (mode) {
-                  if (mode != null) {
-                    ref.read(themeModeProvider.notifier).setThemeMode(mode);
-                    Navigator.pop(context);
-                  }
+              ListTile(
+                title: const Text('داكن'),
+                leading: const Radio<ThemeMode>(value: ThemeMode.dark),
+                onTap: () {
+                  ref
+                      .read(themeModeProvider.notifier)
+                      .setThemeMode(ThemeMode.dark);
+                  Navigator.pop(context);
                 },
               ),
-              onTap: () {
-                ref.read(themeModeProvider.notifier).setThemeMode(ThemeMode.dark);
-                Navigator.pop(context);
-              },
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

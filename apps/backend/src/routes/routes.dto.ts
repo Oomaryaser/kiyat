@@ -74,4 +74,24 @@ export class CreateRouteDto {
   @IsOptional()
   @IsISO8601()
   lastVerifiedAt?: string;
+
+  @IsOptional()
+  stops?: RouteStopInputDto[];
+}
+
+export class RouteStopInputDto {
+  @IsString()
+  nameAr!: string;
+
+  @IsString()
+  nameEn!: string;
+
+  @IsNumber()
+  lat!: number;
+
+  @IsNumber()
+  lng!: number;
+
+  @IsOptional()
+  isMajor?: boolean;
 }

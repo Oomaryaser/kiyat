@@ -73,22 +73,29 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
                 const SizedBox(height: 16),
                 const Text(
                   'حدث خطأ في تحميل تفاصيل الخط',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, fontFamily: 'Tajawal'),
+                  style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      fontFamily: 'Tajawal'),
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  error.toString().contains('SocketException') || error.toString().contains('Network')
+                  error.toString().contains('SocketException') ||
+                          error.toString().contains('Network')
                       ? 'يرجى التحقق من اتصالك بالإنترنت والمحاولة مجدداً.'
                       : 'فشل الاتصال بالخادم. يرجى المحاولة لاحقاً.',
-                  style: TextStyle(color: Colors.grey[600], fontFamily: 'Tajawal'),
+                  style:
+                      TextStyle(color: Colors.grey[600], fontFamily: 'Tajawal'),
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 24),
                 ElevatedButton.icon(
-                  onPressed: () => ref.invalidate(routeDetailProvider(widget.routeId)),
+                  onPressed: () =>
+                      ref.invalidate(routeDetailProvider(widget.routeId)),
                   icon: const Icon(Icons.refresh_rounded),
-                  label: const Text('إعادة المحاولة', style: TextStyle(fontFamily: 'Tajawal')),
+                  label: const Text('إعادة المحاولة',
+                      style: TextStyle(fontFamily: 'Tajawal')),
                 ),
               ],
             ),
@@ -116,8 +123,8 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
     }
     if (!autoLocateRequested) {
       autoLocateRequested = true;
-      WidgetsBinding.instance
-          .addPostFrameCallback((_) => _useCurrentLocation(stops, route.id, isWaitingForThisRoute));
+      WidgetsBinding.instance.addPostFrameCallback(
+          (_) => _useCurrentLocation(stops, route.id, isWaitingForThisRoute));
     }
     final pickupStop = _pickupStop(stops);
     final effectivePickupLat = pickupLat ?? pickupStop?.lat;
@@ -220,7 +227,8 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
                       side: BorderSide(
                         color: const Color(0xFFB42318).withValues(alpha: 0.18),
                       ),
-                      backgroundColor: const Color(0xFFFFF1F0).withValues(alpha: 0.72),
+                      backgroundColor:
+                          const Color(0xFFFFF1F0).withValues(alpha: 0.72),
                       padding: const EdgeInsets.symmetric(vertical: 14),
                     ),
                     label: const Text(
@@ -235,9 +243,11 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
               else
                 Expanded(
                   child: FilledButton.icon(
-                    onPressed: effectivePickupLat == null || effectivePickupLng == null
+                    onPressed: effectivePickupLat == null ||
+                            effectivePickupLng == null
                         ? null
-                        : () => _startPassengerWait(route.id, effectivePickupLat, effectivePickupLng),
+                        : () => _startPassengerWait(
+                            route.id, effectivePickupLat, effectivePickupLng),
                     icon: const Icon(Icons.play_circle_fill_outlined),
                     style: FilledButton.styleFrom(
                       shape: RoundedRectangleBorder(
@@ -284,10 +294,16 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
               skippedCount: skippedCount,
               trackingIsStale: trackingIsStale,
               stops: stops,
-              userLocation: userLat != null && userLng != null ? LatLng(userLat!, userLng!) : null,
-              nearestRoutePoint: pickupLat != null && pickupLng != null ? LatLng(pickupLat!, pickupLng!) : null,
-              onUseCurrentLocation: () => _useCurrentLocation(stops, route.id, isWaitingForThisRoute),
-              onSelectPickup: () => _showPickupSelector(stops, route.id, isWaitingForThisRoute),
+              userLocation: userLat != null && userLng != null
+                  ? LatLng(userLat!, userLng!)
+                  : null,
+              nearestRoutePoint: pickupLat != null && pickupLng != null
+                  ? LatLng(pickupLat!, pickupLng!)
+                  : null,
+              onUseCurrentLocation: () =>
+                  _useCurrentLocation(stops, route.id, isWaitingForThisRoute),
+              onSelectPickup: () =>
+                  _showPickupSelector(stops, route.id, isWaitingForThisRoute),
               onOpenLocationSettings: _openLocationSettings,
             ),
             const SizedBox(height: 12),
@@ -343,7 +359,7 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
     if (activeArrivalRequestKey != requestKey) {
       activeArrivalRequestKey = requestKey;
       _arrivalRefreshTimer?.cancel();
-      _arrivalRefreshTimer = Timer.periodic(const Duration(seconds: 6), (_) {
+      _arrivalRefreshTimer = Timer.periodic(const Duration(seconds: 12), (_) {
         ref.invalidate(routeArrivalProvider(request));
       });
     }
@@ -406,7 +422,8 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
     return stops[pickupStopIndex!];
   }
 
-  void _showPickupSelector(List<TransitStop> stops, String routeId, bool isWaiting) {
+  void _showPickupSelector(
+      List<TransitStop> stops, String routeId, bool isWaiting) {
     showModalBottomSheet<void>(
       context: context,
       builder: (context) {
@@ -488,14 +505,26 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
         LatLng(position.latitude, position.longitude),
         stops,
       );
+      final nearestStop = stops.isEmpty ? null : stops[nearestIndex];
+      final nearestStopDistance = nearestStop == null
+          ? double.infinity
+          : Geolocator.distanceBetween(
+              position.latitude,
+              position.longitude,
+              nearestStop.lat,
+              nearestStop.lng,
+            );
+      final pickupTarget = nearestStopDistance <= 80
+          ? LatLng(nearestStop!.lat, nearestStop.lng)
+          : nearestOnLine;
 
       setState(() {
         userLat = position.latitude;
         userLng = position.longitude;
         pickupStopIndex = nearestIndex;
         usingCurrentLocation = true;
-        pickupLat = nearestOnLine.latitude;
-        pickupLng = nearestOnLine.longitude;
+        pickupLat = pickupTarget.latitude;
+        pickupLng = pickupTarget.longitude;
       });
       if (isWaiting) {
         await _startPassengerWait(routeId, pickupLat!, pickupLng!);
@@ -550,7 +579,8 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
     if (session == null || session.id.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('ما قدرنا نظهر انتظارك للسائق. تأكد من الاتصال وجرب مرة ثانية.'),
+          content: Text(
+              'ما قدرنا نظهر انتظارك للسائق. تأكد من الاتصال وجرب مرة ثانية.'),
         ),
       );
       return;
@@ -558,11 +588,9 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
     await ref
         .read(transitRepositoryProvider)
         .saveActiveWaitSessionId(session.id);
-    await ref
-        .read(transitRepositoryProvider)
-        .saveActiveWaitRouteId(routeId);
+    await ref.read(transitRepositoryProvider).saveActiveWaitRouteId(routeId);
     ref.invalidate(activeWaitRouteIdProvider);
-    
+
     if (mounted) {
       context.go('/');
     }

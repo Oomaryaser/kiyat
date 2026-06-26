@@ -30,7 +30,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   void initState() {
     super.initState();
     _useCurrentLocation();
-    _refreshTimer = Timer.periodic(const Duration(seconds: 6), (_) {
+    _refreshTimer = Timer.periodic(const Duration(seconds: 12), (_) {
       final request = _lastArrivalRequest;
       if (request != null) {
         ref.invalidate(routeArrivalProvider(request));
@@ -79,7 +79,10 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                 const SizedBox(height: 16),
                 const Text(
                   'فشل الاتصال بالخريطة الحية',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, fontFamily: 'Tajawal'),
+                  style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      fontFamily: 'Tajawal'),
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 8),
@@ -92,7 +95,8 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                 ElevatedButton.icon(
                   onPressed: () => ref.invalidate(routeDetailsProvider),
                   icon: const Icon(Icons.refresh_rounded),
-                  label: const Text('إعادة المحاولة', style: TextStyle(fontFamily: 'Tajawal')),
+                  label: const Text('إعادة المحاولة',
+                      style: TextStyle(fontFamily: 'Tajawal')),
                 ),
               ],
             ),
@@ -518,5 +522,3 @@ class _RouteMapChip extends StatelessWidget {
     );
   }
 }
-
-

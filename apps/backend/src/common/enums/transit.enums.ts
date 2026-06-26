@@ -21,6 +21,8 @@ export enum UserRole {
   Passenger = 'passenger',
   Operator = 'operator',
   Admin = 'admin',
+  Owner = 'owner',
+  Support = 'support',
 }
 
 export enum ReportType {

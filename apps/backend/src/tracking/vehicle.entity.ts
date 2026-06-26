@@ -1,6 +1,7 @@
 import {
   Column,
   Entity,
+  Index,
   JoinColumn,
   ManyToOne,
   PrimaryGeneratedColumn,
@@ -9,6 +10,7 @@ import { TransitRoute } from "../routes/route.entity";
 import { User } from "../users/user.entity";
 
 @Entity("vehicles")
+@Index(["isTrackingActive", "lastSeenAt"])
 export class Vehicle {
   @PrimaryGeneratedColumn("uuid")
   id!: string;
