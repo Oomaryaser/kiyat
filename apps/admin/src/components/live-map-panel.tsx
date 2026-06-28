@@ -13,8 +13,10 @@ import {
 } from "lucide-react";
 import {
   getLiveTracking,
+  getRoutes,
   getRouteDetail,
   type LiveTrackingResponse,
+  type TransitRoute,
   type TransitRouteDetail,
 } from "@/lib/api";
 import { loadGoogleMaps } from "@/lib/google-maps-loader";
@@ -45,6 +47,8 @@ interface RouteLine {
 }
 
 const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? "";
+const localRoutesStorageKey = "kiyat-admin-local-routes";
+const localRoutesChangedEvent = "kiyat-admin-local-routes-changed";
 const baghdadCenter = { lat: 33.3152, lng: 44.3661 };
 const routeColors = ["#1b5e8b", "#24605c", "#7c3aed", "#b45309", "#be123c"];
 const cleanMapStyle: google.maps.MapTypeStyle[] = [
@@ -72,9 +76,7 @@ export function LiveMapPanel({ token, isDemo }: LiveMapPanelProps) {
   const polylineRefs = useRef<google.maps.Polyline[]>([]);
   const [mapReady, setMapReady] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
-  const [roadRouteLines, setRoadRouteLines] = useState<RouteLine[]>([]);
-  const [isResolvingRoutes, setIsResolvingRoutes] = useState(false);
-  const [routePathError, setRoutePathError] = useState<string | null>(null);
+  const [localRoutes, setLocalRoutes] = useState<TransitRoute[]>([]);
 
   const liveQuery = useQuery({
     queryKey: ["live-tracking", token],
@@ -106,18 +108,60 @@ export function LiveMapPanel({ token, isDemo }: LiveMapPanelProps) {
       Boolean(liveQuery.data) &&
       liveRouteIds.length > 0,
   });
+  const routeCatalogQuery = useQuery({
+    queryKey: ["live-route-catalog", token],
+    queryFn: () => getRoutes(token ?? "", { page: 1, limit: 500 }),
+    enabled: Boolean(token) && !isDemo,
+  });
   const nearestZoneId = useMemo(
     () => nearestPassengerZoneId(tracking),
     [tracking],
   );
   const routeLines = useMemo(
-    () =>
-      isDemo || !liveQuery.data
-        ? buildMockRouteLines(liveRouteIds)
-        : buildBackendRouteLines(routeDetailsQuery.data ?? []),
-    [isDemo, liveQuery.data, liveRouteIds, routeDetailsQuery.data],
+    () => {
+      const activeRouteLines =
+        isDemo || !liveQuery.data
+          ? buildMockRouteLines(liveRouteIds)
+          : buildBackendRouteLines(routeDetailsQuery.data ?? []);
+      const catalogRouteLines = buildCatalogRouteLines(
+        isDemo ? localRoutes : routeCatalogQuery.data?.data ?? [],
+        activeRouteLines.length,
+      );
+
+      return dedupeRouteLines([...activeRouteLines, ...catalogRouteLines]);
+    },
+    [
+      isDemo,
+      liveQuery.data,
+      liveRouteIds,
+      localRoutes,
+      routeCatalogQuery.data,
+      routeDetailsQuery.data,
+    ],
   );
-  const listedRouteLines = roadRouteLines.length > 0 ? roadRouteLines : routeLines;
+  const listedRouteLines = routeLines;
+
+  useEffect(() => {
+    if (!isDemo) {
+      setLocalRoutes([]);
+      return;
+    }
+
+    function syncLocalRoutes() {
+      setLocalRoutes(readLocalRoutes());
+    }
+
+    syncLocalRoutes();
+    window.addEventListener("storage", syncLocalRoutes);
+    window.addEventListener("focus", syncLocalRoutes);
+    window.addEventListener(localRoutesChangedEvent, syncLocalRoutes);
+
+    return () => {
+      window.removeEventListener("storage", syncLocalRoutes);
+      window.removeEventListener("focus", syncLocalRoutes);
+      window.removeEventListener(localRoutesChangedEvent, syncLocalRoutes);
+    };
+  }, [isDemo]);
 
   useEffect(() => {
     let mounted = true;
@@ -162,52 +206,13 @@ export function LiveMapPanel({ token, isDemo }: LiveMapPanelProps) {
   }, []);
 
   useEffect(() => {
-    if (!mapReady || routeLines.length === 0) {
-      setRoadRouteLines([]);
-      setRoutePathError(null);
-      setIsResolvingRoutes(false);
-      return;
-    }
-
-    let cancelled = false;
-    setIsResolvingRoutes(true);
-    setRoutePathError(null);
-    setRoadRouteLines([]);
-
-    resolveRoadRouteLines(routeLines)
-      .then((resolvedLines) => {
-        if (cancelled) return;
-        setRoadRouteLines(resolvedLines);
-        if (resolvedLines.length < routeLines.length) {
-          setRoutePathError(
-            "بعض الطرق ما انحسبت كمسار شارع من Google Directions.",
-          );
-        }
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setRoadRouteLines([]);
-        setRoutePathError(
-          "تعذر حساب طريق الشارع من Google Directions. تأكد من تفعيل Directions API على نفس المفتاح.",
-        );
-      })
-      .finally(() => {
-        if (!cancelled) setIsResolvingRoutes(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [mapReady, routeLines]);
-
-  useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
 
     clearMapObjects();
     const bounds = new google.maps.LatLngBounds();
 
-    for (const routeLine of roadRouteLines) {
+    for (const routeLine of routeLines) {
       if (routeLine.points.length < 2) continue;
       routeLine.points.forEach((point) => bounds.extend(point));
       drawRouteLine(map, routeLine);
@@ -285,7 +290,7 @@ export function LiveMapPanel({ token, isDemo }: LiveMapPanelProps) {
       });
       return () => google.maps.event.removeListener(listener);
     }
-  }, [mapReady, nearestZoneId, roadRouteLines, tracking]);
+  }, [mapReady, nearestZoneId, routeLines, tracking]);
 
   function drawRouteLine(map: google.maps.Map, routeLine: RouteLine) {
     polylineRefs.current.push(
@@ -406,12 +411,6 @@ export function LiveMapPanel({ token, isDemo }: LiveMapPanelProps) {
           <span>تعذر جلب بيانات الخريطة الحية، تظهر بيانات تجريبية مؤقتاً.</span>
         </div>
       ) : null}
-      {routePathError ? (
-        <div className="inline-alert">
-          <AlertCircle aria-hidden="true" size={18} />
-          <span>{routePathError}</span>
-        </div>
-      ) : null}
 
       <div className="metric-grid live-summary-grid">
         <SmallStat
@@ -439,9 +438,6 @@ export function LiveMapPanel({ token, isDemo }: LiveMapPanelProps) {
       <div className="map-layout">
         <section className="panel map-panel" aria-label="خريطة بغداد">
           <div ref={mapContainerRef} className="live-map-canvas" />
-          {isResolvingRoutes ? (
-            <div className="map-route-loading">حساب مسارات الشوارع</div>
-          ) : null}
           <div className="map-legend">
             <span>
               <i className="legend-line" />
@@ -583,7 +579,7 @@ function buildMockRouteLines(routeIds: string[]) {
         fromName: routeLine.stops[0]?.nameAr ?? "بداية الخط",
         toName:
           routeLine.stops[routeLine.stops.length - 1]?.nameAr ?? "نهاية الخط",
-        points: stops,
+        points: routeLine.path ?? stops,
         stops,
       };
     });
@@ -607,129 +603,79 @@ function buildBackendRouteLines(routes: TransitRouteDetail[]) {
         })
         .filter((point): point is RouteStopPoint => Boolean(point));
 
-      if (stops.length < 2) return null;
+      const routePath =
+        route.routePath?.map((point) => ({ lat: point.lat, lng: point.lng })) ??
+        [];
+      const points = routePath.length >= 2 ? routePath : stops;
+
+      if (points.length < 2) return null;
 
       return {
         routeId: route.id,
         routeName: route.nameAr,
         color: routeColors[index % routeColors.length],
-        fromName: sortedStops[0]?.stop?.nameAr ?? "بداية الخط",
-        toName: sortedStops[sortedStops.length - 1]?.stop?.nameAr ?? "نهاية الخط",
-        points: stops,
-        stops,
+        fromName:
+          sortedStops[0]?.stop?.nameAr ?? route.nameAr.split("-")[0] ?? "بداية الخط",
+        toName:
+          sortedStops[sortedStops.length - 1]?.stop?.nameAr ??
+          route.nameAr.split("-").at(-1) ??
+          "نهاية الخط",
+        points,
+        stops:
+          stops.length >= 2
+            ? stops
+            : [
+                { ...points[0], name: "بداية الخط" },
+                { ...points[points.length - 1], name: "نهاية الخط" },
+              ],
       };
     })
     .filter((routeLine): routeLine is RouteLine => Boolean(routeLine));
 }
 
-async function resolveRoadRouteLines(routeLines: RouteLine[]) {
-  const service = new google.maps.DirectionsService();
-  const resolvedLines: RouteLine[] = [];
+function buildCatalogRouteLines(routes: TransitRoute[], colorOffset = 0) {
+  return routes
+    .map<RouteLine | null>((route, index) => {
+      const points = route.routePath ?? [];
+      if (points.length < 2) return null;
 
+      const fromName = route.nameAr.split("-")[0]?.trim() || "بداية الخط";
+      const toName = route.nameAr.split("-").at(-1)?.trim() || "نهاية الخط";
+
+      return {
+        routeId: route.id,
+        routeName: route.nameAr,
+        color: routeColors[(index + colorOffset) % routeColors.length],
+        fromName,
+        toName,
+        points,
+        stops: [
+          { ...points[0], name: fromName },
+          { ...points[points.length - 1], name: toName },
+        ],
+      };
+    })
+    .filter((routeLine): routeLine is RouteLine => Boolean(routeLine));
+}
+
+function dedupeRouteLines(routeLines: RouteLine[]) {
+  const routeLineMap = new Map<string, RouteLine>();
   for (const routeLine of routeLines) {
-    try {
-      const roadPath = await requestRoadPath(service, routeLine.stops);
-      if (roadPath.length >= 2) {
-        resolvedLines.push({ ...routeLine, points: roadPath });
-      }
-    } catch {
-      // Keep the map honest: if Google cannot calculate a road route,
-      // do not fall back to a fake straight line.
-    }
+    routeLineMap.set(routeLine.routeId, routeLine);
   }
-
-  return resolvedLines;
+  return Array.from(routeLineMap.values());
 }
 
-async function requestRoadPath(
-  service: google.maps.DirectionsService,
-  stops: RouteStopPoint[],
-) {
-  const roadPath: LatLngPoint[] = [];
-  const chunks = buildStopChunks(stops, 25);
-
-  for (const chunk of chunks) {
-    const segmentPath = await requestDirectionsSegment(service, chunk);
-    appendPath(roadPath, segmentPath);
+function readLocalRoutes() {
+  if (typeof window === "undefined") return [];
+  try {
+    const rawValue = window.localStorage.getItem(localRoutesStorageKey);
+    if (!rawValue) return [];
+    const routes = JSON.parse(rawValue) as TransitRoute[];
+    return Array.isArray(routes) ? routes : [];
+  } catch {
+    return [];
   }
-
-  return roadPath;
-}
-
-function buildStopChunks(stops: RouteStopPoint[], maxStopsPerChunk: number) {
-  const chunks: RouteStopPoint[][] = [];
-  const step = Math.max(maxStopsPerChunk, 2) - 1;
-
-  for (let start = 0; start < stops.length - 1; start += step) {
-    const end = Math.min(stops.length, start + maxStopsPerChunk);
-    const chunk = stops.slice(start, end);
-    if (chunk.length >= 2) chunks.push(chunk);
-    if (end === stops.length) break;
-  }
-
-  return chunks;
-}
-
-function requestDirectionsSegment(
-  service: google.maps.DirectionsService,
-  stops: RouteStopPoint[],
-) {
-  const origin = stops[0];
-  const destination = stops[stops.length - 1];
-
-  return new Promise<LatLngPoint[]>((resolve, reject) => {
-    service.route(
-      {
-        origin,
-        destination,
-        waypoints: stops.slice(1, -1).map((stop) => ({
-          location: stop,
-          stopover: true,
-        })),
-        optimizeWaypoints: false,
-        provideRouteAlternatives: false,
-        travelMode: google.maps.TravelMode.DRIVING,
-      },
-      (result, status) => {
-        if (status !== google.maps.DirectionsStatus.OK || !result) {
-          reject(new Error(status));
-          return;
-        }
-
-        resolve(extractDirectionsPath(result));
-      },
-    );
-  });
-}
-
-function extractDirectionsPath(result: google.maps.DirectionsResult) {
-  const route = result.routes[0];
-  const stepPath =
-    route?.legs.flatMap((leg) =>
-      leg.steps.flatMap((step) => step.path.map(latLngToPoint)),
-    ) ?? [];
-
-  if (stepPath.length >= 2) return stepPath;
-  return route?.overview_path.map(latLngToPoint) ?? [];
-}
-
-function appendPath(target: LatLngPoint[], source: LatLngPoint[]) {
-  for (const point of source) {
-    const previous = target[target.length - 1];
-    if (previous && samePoint(previous, point)) continue;
-    target.push(point);
-  }
-}
-
-function samePoint(first: LatLngPoint, second: LatLngPoint) {
-  return (
-    Math.abs(first.lat - second.lat) < 0.000001 &&
-    Math.abs(first.lng - second.lng) < 0.000001
-  );
-}
-
-function latLngToPoint(latLng: google.maps.LatLng) {
-  return { lat: latLng.lat(), lng: latLng.lng() };
 }
 
 function nearestPassengerZoneId(tracking: LiveTrackingResponse) {

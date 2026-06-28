@@ -2,6 +2,11 @@ import { Column, CreateDateColumn, Entity, Index, OneToMany, PrimaryGeneratedCol
 import { RouteStatus, RouteType } from '../common/enums/transit.enums';
 import { RouteStop } from './route-stop.entity';
 
+export interface RoutePathPoint {
+  lat: number;
+  lng: number;
+}
+
 @Entity('routes')
 @Index(['status'])
 export class TransitRoute {
@@ -37,6 +42,9 @@ export class TransitRoute {
 
   @Column({ name: 'last_verified_at', type: 'timestamp', nullable: true })
   lastVerifiedAt!: Date | null;
+
+  @Column({ name: 'route_path', type: 'jsonb', nullable: true })
+  routePath!: RoutePathPoint[] | null;
 
   @OneToMany(() => RouteStop, (routeStop) => routeStop.route, { cascade: true })
   routeStops!: RouteStop[];

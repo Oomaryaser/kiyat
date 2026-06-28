@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   flexRender,
@@ -8,7 +8,8 @@ import {
   useReactTable,
   type ColumnDef,
 } from "@tanstack/react-table";
-import { AlertCircle, RotateCcw, Search } from "lucide-react";
+import { AlertCircle, Plus, RotateCcw, Search } from "lucide-react";
+import { RouteBuilderPanel } from "@/components/route-builder-panel";
 import {
   getRoutes,
   type ListRoutesParams,
@@ -36,9 +37,13 @@ const typeLabels: Record<RouteType, string> = {
   bus: "باص",
   minibus: "ميني باص",
 };
+const localRoutesStorageKey = "kiyat-admin-local-routes";
+const localRoutesChangedEvent = "kiyat-admin-local-routes-changed";
 
 export function RoutesPanel({ token, isDemo }: RoutesPanelProps) {
   const [draftSearch, setDraftSearch] = useState("");
+  const [isBuilderOpen, setIsBuilderOpen] = useState(false);
+  const [localRoutes, setLocalRoutes] = useState<TransitRoute[]>([]);
   const [filters, setFilters] = useState<ListRoutesParams>({
     page: 1,
     limit: 50,
@@ -50,10 +55,24 @@ export function RoutesPanel({ token, isDemo }: RoutesPanelProps) {
     enabled: Boolean(token) && !isDemo,
   });
 
+  useEffect(() => {
+    if (!isDemo && token) {
+      setLocalRoutes([]);
+      return;
+    }
+    setLocalRoutes(readLocalRoutes());
+  }, [isDemo, token]);
+
   const routesResponse = useMemo(() => {
-    if (routesQuery.data) return routesQuery.data;
-    return filterMockRoutes(mockRoutes, filters);
-  }, [filters, routesQuery.data]);
+    const sourceResponse = routesQuery.data ?? mockRoutes;
+    const mergedData = dedupeRoutes([...localRoutes, ...sourceResponse.data]);
+    const mergedResponse = {
+      ...sourceResponse,
+      data: mergedData,
+      total: mergedData.length,
+    };
+    return filterRoutes(mergedResponse, filters);
+  }, [filters, localRoutes, routesQuery.data]);
 
   const columns = useMemo<ColumnDef<TransitRoute>[]>(
     () => [
@@ -106,6 +125,14 @@ export function RoutesPanel({ token, isDemo }: RoutesPanelProps) {
         ),
       },
       {
+        id: "path",
+        header: "المسار",
+        cell: ({ row }) =>
+          row.original.routePath && row.original.routePath.length >= 2
+            ? `${row.original.routePath.length.toLocaleString("ar-IQ")} نقطة`
+            : "غير محدد",
+      },
+      {
         accessorKey: "updatedAt",
         header: "آخر تعديل",
         cell: ({ row }) => formatDate(row.original.updatedAt),
@@ -134,6 +161,23 @@ export function RoutesPanel({ token, isDemo }: RoutesPanelProps) {
     setFilters({ page: 1, limit: 50 });
   }
 
+  function handleRouteCreated(route: TransitRoute) {
+    setLocalRoutes((current) => {
+      const nextRoutes = dedupeRoutes([route, ...current]);
+      if (isDemo || !token) storeLocalRoutes(nextRoutes);
+      return nextRoutes;
+    });
+    setFilters({ page: 1, limit: 50 });
+    setDraftSearch("");
+
+    if (isDemo || !token) {
+      // Demo saves locally so repeated testing keeps the new route visible.
+    } else {
+      void routesQuery.refetch();
+    }
+    setIsBuilderOpen(false);
+  }
+
   return (
     <section className="page-stack" aria-label="الخطوط">
       <div className="section-head">
@@ -141,7 +185,17 @@ export function RoutesPanel({ token, isDemo }: RoutesPanelProps) {
           <p className="eyebrow">Routes</p>
           <h2>الخطوط</h2>
         </div>
-        <span className="status-chip">{routesQuery.data ? "مباشر" : "تجريبي"}</span>
+        <div className="section-actions">
+          <span className="status-chip">{routesQuery.data ? "مباشر" : "تجريبي"}</span>
+          <button
+            className="primary-button compact-button"
+            type="button"
+            onClick={() => setIsBuilderOpen(true)}
+          >
+            <Plus aria-hidden="true" size={16} />
+            <span>إضافة خط</span>
+          </button>
+        </div>
       </div>
 
       {routesQuery.isError ? (
@@ -149,6 +203,15 @@ export function RoutesPanel({ token, isDemo }: RoutesPanelProps) {
           <AlertCircle aria-hidden="true" size={18} />
           <span>تعذر جلب الخطوط من الخادم، تظهر بيانات تجريبية مؤقتاً.</span>
         </div>
+      ) : null}
+
+      {isBuilderOpen ? (
+        <RouteBuilderPanel
+          token={token}
+          isDemo={isDemo}
+          onCreated={handleRouteCreated}
+          onCancel={() => setIsBuilderOpen(false)}
+        />
       ) : null}
 
       <section className="panel routes-toolbar" aria-label="فلاتر الخطوط">
@@ -272,7 +335,7 @@ export function RoutesPanel({ token, isDemo }: RoutesPanelProps) {
   );
 }
 
-function filterMockRoutes(
+function filterRoutes(
   response: PaginatedResponse<TransitRoute>,
   filters: ListRoutesParams,
 ) {
@@ -292,6 +355,35 @@ function filterMockRoutes(
     total: data.length,
     data,
   };
+}
+
+function dedupeRoutes(routes: TransitRoute[]) {
+  const routeMap = new Map<string, TransitRoute>();
+  for (const route of routes) {
+    routeMap.set(route.id, route);
+  }
+  return Array.from(routeMap.values());
+}
+
+function readLocalRoutes() {
+  if (typeof window === "undefined") return [];
+  try {
+    const rawValue = window.localStorage.getItem(localRoutesStorageKey);
+    if (!rawValue) return [];
+    const routes = JSON.parse(rawValue) as TransitRoute[];
+    return Array.isArray(routes) ? routes : [];
+  } catch {
+    return [];
+  }
+}
+
+function storeLocalRoutes(routes: TransitRoute[]) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(
+    localRoutesStorageKey,
+    JSON.stringify(routes.slice(0, 50)),
+  );
+  window.dispatchEvent(new Event(localRoutesChangedEvent));
 }
 
 function formatDate(value: string) {

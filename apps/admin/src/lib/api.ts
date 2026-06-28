@@ -70,6 +70,11 @@ export interface LiveTrackingResponse {
 export type RouteType = "kia" | "coaster" | "bus" | "minibus";
 export type RouteStatus = "active" | "inactive" | "unverified";
 
+export interface RoutePathPoint {
+  lat: number;
+  lng: number;
+}
+
 export interface TransitRoute {
   id: string;
   nameAr: string;
@@ -82,6 +87,7 @@ export interface TransitRoute {
   operatingHoursEnd: string;
   confidenceScore: number;
   lastVerifiedAt: string | null;
+  routePath: RoutePathPoint[] | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -124,6 +130,28 @@ export interface ListRoutesParams {
   search?: string;
   status?: RouteStatus;
   type?: RouteType;
+}
+
+export interface RouteStopInput {
+  nameAr: string;
+  nameEn: string;
+  lat: number;
+  lng: number;
+  isMajor?: boolean;
+}
+
+export interface CreateRoutePayload {
+  nameAr: string;
+  nameEn: string;
+  routeType: RouteType;
+  status?: RouteStatus;
+  fareMin: number;
+  fareMax: number;
+  operatingHoursStart: string;
+  operatingHoursEnd: string;
+  confidenceScore?: number;
+  stops?: RouteStopInput[];
+  routePath?: RoutePathPoint[];
 }
 
 export interface ApiErrorPayload {
@@ -216,4 +244,12 @@ export function getRoutes(token: string, params: ListRoutesParams = {}) {
 
 export function getRouteDetail(token: string, routeId: string) {
   return apiRequest<TransitRouteDetail>(`/routes/${routeId}`, { token });
+}
+
+export function createRoute(token: string, payload: CreateRoutePayload) {
+  return apiRequest<TransitRouteDetail>("/routes", {
+    method: "POST",
+    token,
+    body: JSON.stringify(payload),
+  });
 }

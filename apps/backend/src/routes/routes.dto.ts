@@ -1,5 +1,17 @@
 import { Type } from 'class-transformer';
-import { IsEnum, IsInt, IsISO8601, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
+import {
+  IsArray,
+  IsBoolean,
+  IsEnum,
+  IsInt,
+  IsISO8601,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Max,
+  Min,
+  ValidateNested,
+} from 'class-validator';
 import { PaginationQueryDto } from '../common/dto/pagination.dto';
 import { RouteStatus, RouteType } from '../common/enums/transit.enums';
 
@@ -76,7 +88,16 @@ export class CreateRouteDto {
   lastVerifiedAt?: string;
 
   @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => RouteStopInputDto)
   stops?: RouteStopInputDto[];
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => RoutePathPointInputDto)
+  routePath?: RoutePathPointInputDto[];
 }
 
 export class RouteStopInputDto {
@@ -93,5 +114,14 @@ export class RouteStopInputDto {
   lng!: number;
 
   @IsOptional()
+  @IsBoolean()
   isMajor?: boolean;
+}
+
+export class RoutePathPointInputDto {
+  @IsNumber()
+  lat!: number;
+
+  @IsNumber()
+  lng!: number;
 }
