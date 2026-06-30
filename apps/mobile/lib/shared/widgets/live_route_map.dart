@@ -8,12 +8,14 @@ import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:http/http.dart' as http;
 
+import '../../core/theme/app_theme.dart';
 import '../models/transit_models.dart';
+import '../map_marker.dart';
 
 /// Base URL for the Kiyat backend API.
 const _apiBase = String.fromEnvironment(
   'API_URL',
-  defaultValue: 'http://localhost:3000',
+  defaultValue: 'http://127.0.0.1:3000',
 );
 
 class LiveRouteMap extends StatefulWidget {
@@ -157,8 +159,9 @@ class _LiveRouteMapState extends State<LiveRouteMap>
             : <LatLng>[]);
 
     final showWalkingPath = walkingPolyline.length >= 2;
-    final showRecenterButton =
-        !_autoCameraEnabled && widget.userLocation != null && widget.nearestRoutePoint != null;
+    final showRecenterButton = !_autoCameraEnabled &&
+        widget.userLocation != null &&
+        widget.nearestRoutePoint != null;
 
     return AnimatedBuilder(
       animation: pulseController,
@@ -205,7 +208,7 @@ class _LiveRouteMapState extends State<LiveRouteMap>
                         points: widget.extraRouteLines[i]
                             .map((stop) => LatLng(stop.lat, stop.lng))
                             .toList(),
-                        color: const Color(0xFF455A64).withValues(alpha: 0.32),
+                        color: AppColors.navy.withValues(alpha: 0.28),
                         width: widget.compact ? 3 : 4,
                         zIndex: 0,
                       ),
@@ -219,7 +222,7 @@ class _LiveRouteMapState extends State<LiveRouteMap>
                   Polyline(
                     polylineId: const PolylineId('kiyat_route'),
                     points: routePoints,
-                    color: const Color(0xFF1B5E8B),
+                    color: AppColors.navy,
                     width: widget.compact ? 5 : 6,
                     zIndex: 2,
                   ),
@@ -227,7 +230,7 @@ class _LiveRouteMapState extends State<LiveRouteMap>
                     Polyline(
                       polylineId: const PolylineId('walking_to_route'),
                       points: walkingPolyline,
-                      color: Colors.green.shade600,
+                      color: AppColors.primaryDark,
                       width: 4,
                       patterns: [PatternItem.dash(12), PatternItem.gap(8)],
                       zIndex: 3,
@@ -248,7 +251,8 @@ class _LiveRouteMapState extends State<LiveRouteMap>
                   },
                 ),
               ),
-            if (showWalkingPath && (_walkingMinutes != null || _walkingDistanceMeters != null))
+            if (showWalkingPath &&
+                (_walkingMinutes != null || _walkingDistanceMeters != null))
               Positioned(
                 top: 12,
                 right: 12,
@@ -292,7 +296,8 @@ class _LiveRouteMapState extends State<LiveRouteMap>
         Marker(
           markerId: const MarkerId('user_actual_location'),
           position: widget.userLocation!,
-          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+          icon:
+              BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
           anchor: const Offset(0.5, 0.5),
           infoWindow: const InfoWindow(title: 'موقعك الفعلي'),
           zIndexInt: 11,
@@ -301,7 +306,8 @@ class _LiveRouteMapState extends State<LiveRouteMap>
     }
 
     if (widget.pickupStop != null && pickupIcon != null) {
-      final pickupPosition = widget.nearestRoutePoint ?? LatLng(widget.pickupStop!.lat, widget.pickupStop!.lng);
+      final pickupPosition = widget.nearestRoutePoint ??
+          LatLng(widget.pickupStop!.lat, widget.pickupStop!.lng);
       markers.add(
         Marker(
           markerId: const MarkerId('pickup_location'),
@@ -358,8 +364,8 @@ class _LiveRouteMapState extends State<LiveRouteMap>
         circleId: const CircleId('selected_vehicle_pulse'),
         center: LatLng(selected.lat, selected.lng),
         radius: radius,
-        fillColor: const Color(0xFFF5A623).withValues(alpha: opacity),
-        strokeColor: const Color(0xFFF5A623).withValues(alpha: opacity + 0.08),
+        fillColor: AppColors.primary.withValues(alpha: opacity),
+        strokeColor: AppColors.primary.withValues(alpha: opacity + 0.08),
         strokeWidth: 2,
         zIndex: 4,
       ),
@@ -367,8 +373,8 @@ class _LiveRouteMapState extends State<LiveRouteMap>
         circleId: const CircleId('selected_vehicle_inner_pulse'),
         center: LatLng(selected.lat, selected.lng),
         radius: 38 + (progress * 46),
-        fillColor: const Color(0xFFF5A623).withValues(alpha: 0.2),
-        strokeColor: const Color(0xFFF5A623).withValues(alpha: 0.55),
+        fillColor: AppColors.primary.withValues(alpha: 0.2),
+        strokeColor: AppColors.primary.withValues(alpha: 0.55),
         strokeWidth: 3,
         zIndex: 5,
       ),
@@ -376,35 +382,38 @@ class _LiveRouteMapState extends State<LiveRouteMap>
   }
 
   Future<void> _loadMarkerIcons() async {
-    final icons = await Future.wait([
-      _buildPickupIcon(),
-      _buildStopDotIcon(const Color(0xFF1B5E8B), 28),
-      _buildStopDotIcon(const Color(0xFF7BA9C6), 22),
-      _buildVehicleIcon(
-        bodyColor: const Color(0xFFF5A623),
-        roofColor: const Color(0xFF1B5E8B),
-        label: 'كية',
-      ),
-      _buildVehicleIcon(
-        bodyColor: const Color(0xFF1B5E8B),
-        roofColor: const Color(0xFF0E3148),
-        label: 'كية',
-      ),
-      _buildVehicleIcon(
-        bodyColor: const Color(0xFFB7BDC5),
-        roofColor: const Color(0xFF7C8793),
-        label: 'عدت',
-      ),
-    ]);
-    if (!mounted) return;
-    setState(() {
-      _pickupIcon = icons[0];
-      _majorStopIcon = icons[1];
-      _minorStopIcon = icons[2];
-      _selectedVehicleIcon = icons[3];
-      _vehicleIcon = icons[4];
-      _passedVehicleIcon = icons[5];
-    });
+    try {
+      final pickup = await assetToBitmapDescriptor(
+        'assets/images/kiyat_pickup_point_pin.png',
+        width: 35, height: 43,
+      );
+      final major = await _buildStopDotIcon(AppColors.navy, 28);
+      final minor = await _buildStopDotIcon(AppColors.primary, 22);
+      final selectedVehicle = await assetToBitmapDescriptor(
+        'assets/images/kiyat_heading_to_passenger_driver_marker.png',
+        width: 35, height: 43,
+      );
+      final vehicle = await assetToBitmapDescriptor(
+        'assets/images/kiyat_available_driver_marker.png',
+        width: 33, height: 43,
+      );
+      final passedVehicle = await assetToBitmapDescriptor(
+        'assets/images/kiyat_available_driver_marker.png',
+        width: 28, height: 36,
+      );
+
+      if (!mounted) return;
+      setState(() {
+        _pickupIcon = pickup;
+        _majorStopIcon = major;
+        _minorStopIcon = minor;
+        _selectedVehicleIcon = selectedVehicle;
+        _vehicleIcon = vehicle;
+        _passedVehicleIcon = passedVehicle;
+      });
+    } catch (e) {
+      debugPrint('Error loading live_route_map icons: $e');
+    }
   }
 
   AnimationController _ensurePulseController() {
@@ -425,9 +434,8 @@ class _LiveRouteMapState extends State<LiveRouteMap>
 
     // Try OSRM routing first
     try {
-      final coordsString = widget.stops
-          .map((stop) => '${stop.lng},${stop.lat}')
-          .join(';');
+      final coordsString =
+          widget.stops.map((stop) => '${stop.lng},${stop.lat}').join(';');
       final uri = Uri.https(
         'router.project-osrm.org',
         '/route/v1/driving/$coordsString',
@@ -437,8 +445,10 @@ class _LiveRouteMapState extends State<LiveRouteMap>
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
         final routes = data['routes'] as List<dynamic>? ?? const [];
-        final geometry = routes.firstOrNull?['geometry'] as Map<String, dynamic>?;
-        final coordinates = geometry?['coordinates'] as List<dynamic>? ?? const [];
+        final geometry =
+            routes.firstOrNull?['geometry'] as Map<String, dynamic>?;
+        final coordinates =
+            geometry?['coordinates'] as List<dynamic>? ?? const [];
         final points = coordinates
             .whereType<List<dynamic>>()
             .where((point) => point.length >= 2)
@@ -482,7 +492,8 @@ class _LiveRouteMapState extends State<LiveRouteMap>
           Uri.https('maps.googleapis.com', '/maps/api/directions/json', query);
 
       try {
-        final response = await http.get(uri).timeout(const Duration(seconds: 8));
+        final response =
+            await http.get(uri).timeout(const Duration(seconds: 8));
         if (response.statusCode == 200) {
           final data = jsonDecode(response.body) as Map<String, dynamic>;
           final routes = data['routes'] as List<dynamic>?;
@@ -519,13 +530,13 @@ class _LiveRouteMapState extends State<LiveRouteMap>
     // When the passenger is still walking to the route, focus on walking path.
     if (user != null && target != null) {
       final distToRoute = Geolocator.distanceBetween(
-        user.latitude, user.longitude,
-        target.latitude, target.longitude,
+        user.latitude,
+        user.longitude,
+        target.latitude,
+        target.longitude,
       );
       if (distToRoute > 10) {
-        final path = _walkingRoute.isNotEmpty
-            ? _walkingRoute
-            : [user, target];
+        final path = _walkingRoute.isNotEmpty ? _walkingRoute : [user, target];
         if (path.length >= 2) {
           await controller.animateCamera(
             CameraUpdate.newLatLngBounds(_boundsFor(path), 60),
@@ -544,7 +555,8 @@ class _LiveRouteMapState extends State<LiveRouteMap>
       ...widget.vehicles.map((vehicle) => LatLng(vehicle.lat, vehicle.lng)),
     ];
     await controller.animateCamera(
-      CameraUpdate.newLatLngBounds(_boundsFor(points), widget.compact ? 24 : 56),
+      CameraUpdate.newLatLngBounds(
+          _boundsFor(points), widget.compact ? 24 : 56),
     );
   }
 
@@ -663,10 +675,10 @@ class _LiveRouteMapState extends State<LiveRouteMap>
     canvas.drawCircle(
       center,
       30,
-      Paint()..color = const Color(0xFF1B5E8B).withValues(alpha: 0.16),
+      Paint()..color = AppColors.navy.withValues(alpha: 0.16),
     );
     canvas.drawCircle(center, 18, Paint()..color = Colors.white);
-    canvas.drawCircle(center, 12, Paint()..color = const Color(0xFF1B5E8B));
+    canvas.drawCircle(center, 12, Paint()..color = AppColors.navy);
     canvas.drawCircle(center, 5, Paint()..color = Colors.white);
 
     final bytes = await _pictureToBytes(recorder, size.toInt(), size.toInt());
@@ -806,11 +818,11 @@ class _RecenterButton extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
         decoration: BoxDecoration(
-          color: const Color(0xFF1B5E8B),
+          color: AppColors.navy,
           borderRadius: BorderRadius.circular(30),
           boxShadow: [
             BoxShadow(
-              color: const Color(0xFF1B5E8B).withValues(alpha: 0.38),
+              color: AppColors.navy.withValues(alpha: 0.34),
               blurRadius: 12,
               offset: const Offset(0, 4),
             ),
@@ -875,12 +887,16 @@ class _WalkingEtaBadge extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.directions_walk, size: 17, color: Colors.green.shade700),
+            const Icon(
+              Icons.directions_walk,
+              size: 17,
+              color: AppColors.primaryDark,
+            ),
             const SizedBox(width: 6),
             Text(
               text,
               style: const TextStyle(
-                color: Color(0xFF173244),
+                color: AppColors.navy,
                 fontSize: 13,
                 fontWeight: FontWeight.w800,
                 fontFamily: 'Tajawal',

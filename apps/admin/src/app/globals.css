@@ -4,10 +4,12 @@
   --surface-soft: #f7f9fb;
   --border: #d8e0e7;
   --border-strong: #b8c5cf;
-  --text: #14212b;
+  --text: #202a38;
   --muted: #637381;
-  --teal: #24605c;
-  --teal-dark: #174743;
+  --brand-navy: #202a38;
+  --brand-green: #2ecc71;
+  --teal: #2ecc71;
+  --teal-dark: #1fa95a;
   --blue: #2563eb;
   --green: #15803d;
   --amber: #b45309;
@@ -58,8 +60,8 @@ button:disabled {
   place-items: center;
   padding: 24px;
   background:
-    linear-gradient(135deg, rgba(36, 96, 92, 0.12), transparent 42%),
-    radial-gradient(circle at 20% 20%, rgba(180, 83, 9, 0.12), transparent 30%),
+    linear-gradient(135deg, rgba(46, 204, 113, 0.14), transparent 42%),
+    radial-gradient(circle at 20% 20%, rgba(32, 42, 56, 0.1), transparent 30%),
     var(--bg);
 }
 
@@ -92,16 +94,11 @@ button:disabled {
 }
 
 .brand-mark {
-  display: grid;
   width: 42px;
   height: 42px;
   flex: 0 0 42px;
-  place-items: center;
   border-radius: 8px;
-  background: var(--teal);
-  color: #fff;
-  font-size: 24px;
-  font-weight: 800;
+  box-shadow: 0 8px 22px rgba(32, 42, 56, 0.16);
 }
 
 .eyebrow {
@@ -152,7 +149,7 @@ button:disabled {
 .input-wrap:focus-within {
   border-color: var(--teal);
   background: #fff;
-  box-shadow: 0 0 0 3px rgba(36, 96, 92, 0.12);
+  box-shadow: 0 0 0 3px rgba(46, 204, 113, 0.14);
 }
 
 .input-wrap input {
@@ -219,14 +216,14 @@ button:disabled {
 }
 
 .demo-button {
-  border: 1px dashed rgba(36, 96, 92, 0.35);
-  background: rgba(36, 96, 92, 0.08);
-  color: var(--teal-dark);
+  border: 1px dashed rgba(32, 42, 56, 0.35);
+  background: rgba(32, 42, 56, 0.06);
+  color: var(--brand-navy);
 }
 
 .demo-button:hover:not(:disabled) {
   border-color: var(--teal);
-  background: rgba(36, 96, 92, 0.14);
+  background: rgba(46, 204, 113, 0.12);
 }
 
 .demo-button:disabled {
@@ -239,7 +236,7 @@ button:disabled {
 }
 
 .ghost-button:hover:not(:disabled) {
-  background: rgba(36, 96, 92, 0.08);
+  background: rgba(46, 204, 113, 0.1);
 }
 
 .spin {
@@ -309,8 +306,8 @@ button:disabled {
 }
 
 .nav-item.active {
-  background: rgba(36, 96, 92, 0.1);
-  color: var(--teal-dark);
+  background: rgba(46, 204, 113, 0.14);
+  color: var(--brand-navy);
   font-weight: 800;
 }
 
@@ -423,9 +420,9 @@ button:disabled {
   display: inline-flex;
   align-items: center;
   min-height: 30px;
-  border: 1px solid rgba(36, 96, 92, 0.2);
+  border: 1px solid rgba(46, 204, 113, 0.22);
   border-radius: 8px;
-  background: rgba(36, 96, 92, 0.08);
+  background: rgba(46, 204, 113, 0.1);
   color: var(--teal-dark);
   padding: 0 10px;
   font-size: 13px;
@@ -667,7 +664,7 @@ button:disabled {
   width: 24px;
   height: 4px;
   border-radius: 999px;
-  background: #1b5e8b;
+  background: var(--brand-navy);
   box-shadow: 0 0 0 2px #fff, 0 2px 8px rgba(15, 23, 42, 0.2);
 }
 
@@ -676,7 +673,7 @@ button:disabled {
 }
 
 .legend-zone {
-  background: #1b5e8b;
+  background: var(--brand-navy);
 }
 
 .legend-zone-nearest {
@@ -816,7 +813,7 @@ button:disabled {
 
 .vehicle-row:hover {
   border-color: var(--teal);
-  background: rgba(36, 96, 92, 0.07);
+  background: rgba(46, 204, 113, 0.09);
 }
 
 .vehicle-row div {
@@ -859,7 +856,7 @@ button:disabled {
   place-items: center;
   border: 3px solid #fff;
   border-radius: 50%;
-  background: #1b5e8b;
+  background: var(--brand-navy);
   box-shadow: 0 4px 12px rgba(15, 23, 42, 0.22);
   color: #fff;
   font-size: 14px;
@@ -949,7 +946,7 @@ button:disabled {
 
 .endpoint-toggle button.active {
   border-color: var(--teal);
-  background: rgba(36, 96, 92, 0.1);
+  background: rgba(46, 204, 113, 0.12);
   color: var(--teal-dark);
 }
 
@@ -1063,13 +1060,13 @@ button:disabled {
 
 .route-editor-toolbar button {
   border: 0;
-  background: rgba(36, 96, 92, 0.08);
+  background: rgba(46, 204, 113, 0.1);
   color: var(--teal-dark);
   padding: 0 10px;
 }
 
 .route-editor-toolbar button:hover:not(:disabled) {
-  background: rgba(36, 96, 92, 0.16);
+  background: rgba(46, 204, 113, 0.18);
 }
 
 .route-editor-toolbar button:disabled {
@@ -1103,7 +1100,7 @@ button:disabled {
 .compact-field select:focus {
   border-color: var(--teal);
   background: #fff;
-  box-shadow: 0 0 0 3px rgba(36, 96, 92, 0.12);
+  box-shadow: 0 0 0 3px rgba(46, 204, 113, 0.14);
 }
 
 .toolbar-actions {
@@ -1253,7 +1250,7 @@ button:disabled {
   height: 26px;
   place-items: center;
   border-radius: 8px;
-  background: rgba(36, 96, 92, 0.1);
+  background: rgba(46, 204, 113, 0.12);
   color: var(--teal-dark);
   font-size: 12px;
   font-weight: 900;

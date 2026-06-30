@@ -183,7 +183,7 @@ export const mockRouteLines: MockRouteLine[] = [
   {
     routeId: "route-demo-1",
     routeName: "بغداد الجديدة - النهضة",
-    color: "#1b5e8b",
+    color: "#202a38",
     path: [
       { lat: 33.3009, lng: 44.4927 },
       { lat: 33.3064, lng: 44.4849 },
@@ -205,7 +205,7 @@ export const mockRouteLines: MockRouteLine[] = [
   {
     routeId: "route-demo-2",
     routeName: "الكاظمية - الوزيرية",
-    color: "#24605c",
+    color: "#2ecc71",
     path: [
       { lat: 33.3792, lng: 44.3384 },
       { lat: 33.3729, lng: 44.3474 },

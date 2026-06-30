@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../shared/ui/kiyat_logo.dart';
 import 'auth_provider.dart';
 
 class AuthScreen extends ConsumerStatefulWidget {
@@ -29,6 +30,9 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          const SizedBox(height: 16),
+          const Center(child: KiyatLogo(size: 58)),
+          const SizedBox(height: 28),
           Text('رقم الهاتف', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 8),
           TextField(
@@ -38,7 +42,8 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
               hintText: '07XX XXX XXXX',
               prefixIcon: Icon(Icons.phone_outlined),
             ),
-            enabled: !authState.otpSent && authState.status != AuthStatus.loading,
+            enabled:
+                !authState.otpSent && authState.status != AuthStatus.loading,
           ),
           if (authState.otpSent) ...[
             const SizedBox(height: 16),
@@ -71,7 +76,8 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                       final phone = _phoneController.text.trim();
                       if (phone.isEmpty) {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('الرجاء إدخال رقم الهاتف')),
+                          const SnackBar(
+                              content: Text('الرجاء إدخال رقم الهاتف')),
                         );
                         return;
                       }
@@ -81,18 +87,23 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
                       final phone = _phoneController.text.trim();
                       if (otp.isEmpty || otp.length < 6) {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('الرجاء إدخال رمز التحقق المكون من 6 أرقام')),
+                          const SnackBar(
+                              content: Text(
+                                  'الرجاء إدخال رمز التحقق المكون من 6 أرقام')),
                         );
                         return;
                       }
-                      await ref.read(authProvider.notifier).verifyOtp(phone, otp);
+                      await ref
+                          .read(authProvider.notifier)
+                          .verifyOtp(phone, otp);
                     }
                   },
             child: authState.status == AuthStatus.loading
                 ? const SizedBox(
                     width: 20,
                     height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: Colors.white),
                   )
                 : Text(authState.otpSent ? 'دخول' : 'إرسال الرمز'),
           ),

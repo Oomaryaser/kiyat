@@ -50,9 +50,9 @@ export function LoginCard({ onAuthenticated, onDemoLogin }: LoginCardProps) {
     <main className="login-page">
       <section className="login-panel" aria-labelledby="login-title">
         <div className="brand-lockup">
-          <div className="brand-mark">ك</div>
+          <img className="brand-mark" src="/kiyat-mark.svg" alt="" />
           <div>
-            <p className="eyebrow">Kiyat Admin</p>
+            <p className="eyebrow">KIYAT ADMIN</p>
             <h1 id="login-title">لوحة كيات</h1>
           </div>
         </div>

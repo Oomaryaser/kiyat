@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../shared/data/transit_repository.dart';
+import '../../shared/ui/kiyat_logo.dart';
 import '../../shared/settings/passenger_settings.dart';
 
 class SettingsScreen extends ConsumerWidget {
@@ -21,6 +22,8 @@ class SettingsScreen extends ConsumerWidget {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          const Center(child: KiyatLogo(size: 56)),
+          const SizedBox(height: 16),
           settingsAsync.when(
             data: (settings) => _SettingsSection(
               children: [
@@ -89,7 +92,7 @@ class SettingsScreen extends ConsumerWidget {
                 onTap: () => _clearWait(context, ref),
               ),
               ListTile(
-                leading: const Icon(Icons.info_outline),
+                leading: const KiyatLogo(size: 34, showWordmark: false),
                 title: const Text('كيات'),
                 subtitle: const Text('نسخة الراكب التجريبية لبغداد.'),
               ),

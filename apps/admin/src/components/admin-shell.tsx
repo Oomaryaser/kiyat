@@ -54,9 +54,9 @@ export function AdminShell({
     <div className="admin-frame">
       <aside className="sidebar">
         <div className="sidebar-brand">
-          <div className="brand-mark">ك</div>
+          <img className="brand-mark" src="/kiyat-mark.svg" alt="" />
           <div>
-            <p className="eyebrow">Kiyat</p>
+            <p className="eyebrow">KIYAT</p>
             <strong>إدارة التشغيل</strong>
           </div>
         </div>

@@ -5,9 +5,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/theme/app_theme.dart';
 import '../../core/utils/location_helper.dart';
 
 import '../../shared/data/transit_repository.dart';
+import '../../shared/ui/kiyat_logo.dart';
 import '../../shared/models/transit_models.dart';
 import '../../shared/widgets/live_route_map.dart';
 
@@ -51,7 +53,14 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     return Scaffold(
       extendBodyBehindAppBar: true,
       appBar: AppBar(
-        title: const Text('الخريطة الحية'),
+        title: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            KiyatLogo(size: 30, showWordmark: false),
+            SizedBox(width: 8),
+            Text('الخريطة الحية'),
+          ],
+        ),
         backgroundColor: Colors.white.withValues(alpha: 0.88),
         surfaceTintColor: Colors.transparent,
         elevation: 0,
@@ -312,11 +321,11 @@ class _RoutesPreviewPanel extends StatelessWidget {
                   width: 44,
                   height: 44,
                   decoration: BoxDecoration(
-                    color: const Color(0xFFFFE8BE),
+                    color: AppColors.primary.withValues(alpha: 0.16),
                     borderRadius: BorderRadius.circular(14),
                   ),
                   child: const Icon(Icons.directions_bus_filled,
-                      color: Color(0xFFF5A623)),
+                      color: AppColors.navy),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
@@ -414,7 +423,7 @@ class _MapLocationMode extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: const Color(0xFFF6F7F8),
+        color: AppColors.navy.withValues(alpha: 0.04),
         borderRadius: BorderRadius.circular(14),
       ),
       child: Row(
@@ -478,10 +487,12 @@ class _RouteMapChip extends StatelessWidget {
         width: 190,
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: isSelected ? const Color(0xFFEBF6FC) : const Color(0xFFF6F7F8),
+          color: isSelected
+              ? AppColors.primary.withValues(alpha: 0.12)
+              : AppColors.navy.withValues(alpha: 0.04),
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: isSelected ? const Color(0xFF1B5E8B) : Colors.transparent,
+            color: isSelected ? AppColors.primary : Colors.transparent,
             width: 1.4,
           ),
         ),
@@ -493,9 +504,7 @@ class _RouteMapChip extends StatelessWidget {
                 Icon(
                   isSelected ? Icons.radio_button_checked : Icons.route,
                   size: 18,
-                  color: isSelected
-                      ? const Color(0xFF1B5E8B)
-                      : Colors.grey.shade600,
+                  color: isSelected ? AppColors.navy : Colors.grey.shade600,
                 ),
                 const SizedBox(width: 6),
                 Expanded(

@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -16,6 +18,8 @@ class DriverTrackingState {
   final String? statusMessage;
   final bool loadingDetail;
   final DriverRouteDetail? routeDetail;
+  final bool isSimulating;
+  final List<LatLng> roadRoute;
 
   const DriverTrackingState({
     this.route,
@@ -27,6 +31,8 @@ class DriverTrackingState {
     this.statusMessage,
     this.loadingDetail = false,
     this.routeDetail,
+    this.isSimulating = false,
+    this.roadRoute = const [],
   });
 
   DriverTrackingState copyWith({
@@ -39,6 +45,8 @@ class DriverTrackingState {
     String? statusMessage,
     bool? loadingDetail,
     DriverRouteDetail? routeDetail,
+    bool? isSimulating,
+    List<LatLng>? roadRoute,
   }) {
     return DriverTrackingState(
       route: route ?? this.route,
@@ -50,6 +58,8 @@ class DriverTrackingState {
       statusMessage: statusMessage ?? this.statusMessage,
       loadingDetail: loadingDetail ?? this.loadingDetail,
       routeDetail: routeDetail ?? this.routeDetail,
+      isSimulating: isSimulating ?? this.isSimulating,
+      roadRoute: roadRoute ?? this.roadRoute,
     );
   }
 }
@@ -57,6 +67,7 @@ class DriverTrackingState {
 class DriverTrackingNotifier extends Notifier<DriverTrackingState> {
   StreamSubscription<Position>? _positionSubscription;
   Timer? _waitsTimer;
+  Timer? _simulationTimer;
 
   @override
   DriverTrackingState build() {
@@ -87,6 +98,9 @@ class DriverTrackingNotifier extends Notifier<DriverTrackingState> {
         routeDetail: routeDetail,
         loadingDetail: false,
       );
+
+      final roadRoute = await _loadTransitRoadRoute(routeDetail.stops);
+      state = state.copyWith(roadRoute: roadRoute);
 
       final serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
@@ -147,31 +161,27 @@ class DriverTrackingNotifier extends Notifier<DriverTrackingState> {
     final stops = routeDetail?.stops ?? const [];
     
     // Snapping calculation
-    final routeGuidance = stops.length < 2
-        ? null
-        : DriverRouteGuidance.fromStops(
-            stops: stops,
-            position: LatLng(position.latitude, position.longitude),
-            thresholdMeters: 35,
-          );
+    final currentPos = LatLng(position.latitude, position.longitude);
+    DriverRouteGuidance? routeGuidance;
+    if (state.roadRoute.isNotEmpty) {
+      routeGuidance = DriverRouteGuidance.fromPoints(
+        points: state.roadRoute,
+        position: currentPos,
+        thresholdMeters: 35,
+      );
+    } else if (stops.length >= 2) {
+      routeGuidance = DriverRouteGuidance.fromStops(
+        stops: stops,
+        position: currentPos,
+        thresholdMeters: 35,
+      );
+    }
 
     final repo = ref.read(driverRepositoryProvider);
     final vehicle = state.vehicle;
     if (vehicle == null) return;
 
-    if (routeGuidance?.isOffRoute == true) {
-      if (state.isServerTrackingActive) {
-        try {
-          await repo.stopVehicleTracking(vehicle.id);
-        } catch (_) {}
-      }
-      state = state.copyWith(
-        lastPosition: position,
-        isServerTrackingActive: false,
-        statusMessage: 'روح لأقرب نقطة على الخط علمود يبدأ التتبع مالتك.',
-      );
-      return;
-    }
+    final isOffRoute = routeGuidance?.isOffRoute == true;
 
     try {
       final socket = repo.socket;
@@ -197,10 +207,13 @@ class DriverTrackingNotifier extends Notifier<DriverTrackingState> {
       state = state.copyWith(
         lastPosition: position,
         isServerTrackingActive: true,
-        statusMessage: 'التتبع شغال والركاب يشوفون كيتك.',
+        statusMessage: isOffRoute
+            ? 'روح لأقرب نقطة على الخط علمود يبدأ التتبع مالتك.'
+            : 'التتبع شغال والركاب يشوفون كيتك.',
       );
     } catch (e) {
       state = state.copyWith(
+        lastPosition: position,
         statusMessage: e is DriverRepositoryException ? e.message : 'فشل تحديث الموقع.',
       );
     }
@@ -221,6 +234,8 @@ class DriverTrackingNotifier extends Notifier<DriverTrackingState> {
     final vehicle = state.vehicle;
     if (vehicle == null) return;
     
+    _simulationTimer?.cancel();
+    _simulationTimer = null;
     _positionSubscription?.cancel();
     _positionSubscription = null;
     _waitsTimer?.cancel();
@@ -233,6 +248,121 @@ class DriverTrackingNotifier extends Notifier<DriverTrackingState> {
     } catch (_) {}
 
     state = const DriverTrackingState();
+  }
+
+  Future<void> startSimulationToNearestPassenger() async {
+    final position = state.lastPosition;
+    if (position == null) return;
+    final currentPos = LatLng(position.latitude, position.longitude);
+
+    LatLng target;
+    if (state.waits.isNotEmpty) {
+      final sorted = [...state.waits];
+      sorted.sort((a, b) {
+        final distanceA = Geolocator.distanceBetween(currentPos.latitude, currentPos.longitude, a.lat, a.lng);
+        final distanceB = Geolocator.distanceBetween(currentPos.latitude, currentPos.longitude, b.lat, b.lng);
+        return distanceA.compareTo(distanceB);
+      });
+      target = LatLng(sorted.first.lat, sorted.first.lng);
+    } else {
+      final stops = state.routeDetail?.stops ?? const [];
+      if (stops.isEmpty) return;
+      target = LatLng(stops.first.lat, stops.first.lng);
+    }
+
+    try {
+      final uri = Uri.https(
+        'router.project-osrm.org',
+        '/route/v1/driving/${currentPos.longitude},${currentPos.latitude};${target.longitude},${target.latitude}',
+        {'overview': 'full', 'geometries': 'geojson'},
+      );
+      final response = await http.get(uri).timeout(const Duration(seconds: 6));
+      if (response.statusCode != 200) return;
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final routes = data['routes'] as List<dynamic>? ?? const [];
+      final geometry = routes.firstOrNull?['geometry'] as Map<String, dynamic>?;
+      final coordinates = geometry?['coordinates'] as List<dynamic>? ?? const [];
+      final points = coordinates
+          .whereType<List<dynamic>>()
+          .where((point) => point.length >= 2)
+          .map(
+            (point) => LatLng(
+              (point[1] as num).toDouble(),
+              (point[0] as num).toDouble(),
+            ),
+          )
+          .toList();
+
+      if (points.isEmpty) return;
+
+      _simulationTimer?.cancel();
+      int index = 0;
+      state = state.copyWith(isSimulating: true);
+
+      _simulationTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+        if (index >= points.length) {
+          timer.cancel();
+          _simulationTimer = null;
+          state = state.copyWith(isSimulating: false);
+          return;
+        }
+        final pt = points[index];
+        final nextPos = Position(
+          latitude: pt.latitude,
+          longitude: pt.longitude,
+          timestamp: DateTime.now(),
+          accuracy: 10.0,
+          altitude: 0.0,
+          altitudeAccuracy: 0.0,
+          heading: 0.0,
+          headingAccuracy: 0.0,
+          speed: 10.0,
+          speedAccuracy: 0.0,
+        );
+        _sendPosition(nextPos);
+        index++;
+      });
+    } catch (_) {
+      state = state.copyWith(isSimulating: false);
+    }
+  }
+
+  void stopSimulation() {
+    _simulationTimer?.cancel();
+    _simulationTimer = null;
+    state = state.copyWith(isSimulating: false);
+  }
+
+  Future<List<LatLng>> _loadTransitRoadRoute(List<DriverStop> stops) async {
+    if (stops.length < 2) return const [];
+    try {
+      final coordsString = stops
+          .map((stop) => '${stop.lng},${stop.lat}')
+          .join(';');
+      final uri = Uri.https(
+        'router.project-osrm.org',
+        '/route/v1/driving/$coordsString',
+        {'overview': 'full', 'geometries': 'geojson'},
+      );
+      final response = await http.get(uri).timeout(const Duration(seconds: 6));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        final routes = data['routes'] as List<dynamic>? ?? const [];
+        final geometry = routes.firstOrNull?['geometry'] as Map<String, dynamic>?;
+        final coordinates = geometry?['coordinates'] as List<dynamic>? ?? const [];
+        return coordinates
+            .whereType<List<dynamic>>()
+            .where((point) => point.length >= 2)
+            .map(
+              (point) => LatLng(
+                (point[1] as num).toDouble(),
+                (point[0] as num).toDouble(),
+              ),
+            )
+            .toList();
+      }
+    } catch (_) {}
+    return const [];
   }
 }
 

@@ -61,6 +61,9 @@ class _TrackingScreenState extends ConsumerState<TrackingScreen> {
               nearestWait: nearestWait,
               lastPosition: trackingState.lastPosition,
               onStop: () => _confirmStop(ref),
+              isSimulating: trackingState.isSimulating,
+              onStartSimulation: () => ref.read(driverTrackingProvider.notifier).startSimulationToNearestPassenger(),
+              onStopSimulation: () => ref.read(driverTrackingProvider.notifier).stopSimulation(),
             ),
           ],
         ),
@@ -155,6 +158,9 @@ class _DriverNavigationSheet extends StatelessWidget {
     required this.nearestWait,
     required this.lastPosition,
     required this.onStop,
+    required this.isSimulating,
+    required this.onStartSimulation,
+    required this.onStopSimulation,
   });
 
   final String routeName;
@@ -168,6 +174,9 @@ class _DriverNavigationSheet extends StatelessWidget {
   final PassengerWaitPoint? nearestWait;
   final Position? lastPosition;
   final VoidCallback onStop;
+  final bool isSimulating;
+  final VoidCallback onStartSimulation;
+  final VoidCallback onStopSimulation;
 
   @override
   Widget build(BuildContext context) {
@@ -314,6 +323,33 @@ class _DriverNavigationSheet extends StatelessWidget {
                 style: TextStyle(color: Colors.grey.shade700),
               ),
             ],
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              height: 48,
+              child: ElevatedButton.icon(
+                onPressed: isSimulating ? onStopSimulation : onStartSimulation,
+                icon: Icon(
+                  isSimulating ? Icons.stop_rounded : Icons.directions_car_rounded,
+                  color: Colors.white,
+                ),
+                label: Text(
+                  isSimulating ? 'إيقاف محاكاة القيادة' : 'محاكاة القيادة نحو الراكب',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontFamily: 'Tajawal',
+                  ),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: isSimulating ? Colors.red.shade700 : colors.primary,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  elevation: 2,
+                ),
+              ),
+            ),
             const SizedBox(height: 16),
             SlideToToggle(
               onTriggered: onStop,

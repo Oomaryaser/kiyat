@@ -18,7 +18,20 @@ class DriverRouteGuidance {
     required LatLng position,
     required double thresholdMeters,
   }) {
-    final nearest = _nearestPointOnDriverRoute(position, stops);
+    final points = stops.map((s) => LatLng(s.lat, s.lng)).toList();
+    return DriverRouteGuidance.fromPoints(
+      points: points,
+      position: position,
+      thresholdMeters: thresholdMeters,
+    );
+  }
+
+  factory DriverRouteGuidance.fromPoints({
+    required List<LatLng> points,
+    required LatLng position,
+    required double thresholdMeters,
+  }) {
+    final nearest = _nearestPointOnPoints(position, points);
     final distance = Geolocator.distanceBetween(
       position.latitude,
       position.longitude,
@@ -33,17 +46,17 @@ class DriverRouteGuidance {
   }
 }
 
-LatLng _nearestPointOnDriverRoute(LatLng point, List<DriverStop> stops) {
-  if (stops.isEmpty) return point;
-  if (stops.length == 1) return LatLng(stops.first.lat, stops.first.lng);
+LatLng _nearestPointOnPoints(LatLng point, List<LatLng> points) {
+  if (points.isEmpty) return point;
+  if (points.length == 1) return points.first;
 
-  var nearestPoint = LatLng(stops.first.lat, stops.first.lng);
+  var nearestPoint = points.first;
   var minDistance = double.infinity;
-  for (var index = 0; index < stops.length - 1; index += 1) {
+  for (var index = 0; index < points.length - 1; index += 1) {
     final projected = _projectPointToDriverSegment(
       point,
-      LatLng(stops[index].lat, stops[index].lng),
-      LatLng(stops[index + 1].lat, stops[index + 1].lng),
+      points[index],
+      points[index + 1],
     );
     final distance = Geolocator.distanceBetween(
       point.latitude,

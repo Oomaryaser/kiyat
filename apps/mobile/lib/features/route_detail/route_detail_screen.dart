@@ -6,11 +6,13 @@ import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 
+import '../../core/theme/app_theme.dart';
 import '../../core/utils/location_helper.dart';
 import '../../shared/data/transit_repository.dart';
 import '../../shared/models/transit_models.dart';
 import '../../shared/notifications/passenger_notifications.dart';
 import '../../shared/settings/passenger_settings.dart';
+import '../../shared/ui/kiyat_logo.dart';
 import '../../shared/widgets/live_route_map.dart';
 import '../report/report_bottom_sheet.dart';
 
@@ -164,13 +166,20 @@ class _RouteDetailScreenState extends ConsumerState<RouteDetailScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text(
-          'تفاصيل الخط',
-          style: TextStyle(
-            fontWeight: FontWeight.w900,
-            fontFamily: 'Tajawal',
-            fontSize: 20,
-          ),
+        title: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            KiyatLogo(size: 30, showWordmark: false),
+            SizedBox(width: 8),
+            Text(
+              'تفاصيل الخط',
+              style: TextStyle(
+                fontWeight: FontWeight.w900,
+                fontFamily: 'Tajawal',
+                fontSize: 20,
+              ),
+            ),
+          ],
         ),
         centerTitle: true,
         backgroundColor: Colors.transparent,
@@ -1468,7 +1477,7 @@ class _GlassCard extends StatelessWidget {
           ),
         ],
         border: Border.all(
-          color: const Color(0xFF1B5E8B).withValues(alpha: 0.08),
+          color: AppColors.primary.withValues(alpha: 0.08),
           width: 1.2,
         ),
       ),

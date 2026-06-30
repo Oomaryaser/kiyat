@@ -116,14 +116,14 @@ export function OverviewPanel({ query }: OverviewPanelProps) {
                   tick={{ fontSize: 12 }}
                 />
                 <Tooltip
-                  cursor={{ fill: "rgba(36, 96, 92, 0.08)" }}
+                  cursor={{ fill: "rgba(46, 204, 113, 0.1)" }}
                   contentStyle={{
                     borderRadius: 8,
                     border: "1px solid #d6dde4",
                     direction: "rtl",
                   }}
                 />
-                <Bar dataKey="waitCount" fill="#24605c" radius={[0, 5, 5, 0]} />
+                <Bar dataKey="waitCount" fill="#2ecc71" radius={[0, 5, 5, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>

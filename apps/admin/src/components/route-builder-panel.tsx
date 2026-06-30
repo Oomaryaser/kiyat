@@ -163,7 +163,7 @@ export function RouteBuilderPanel({
     } else if (routePath.length >= 2) {
       polylineRefs.current.push(
         buildPolyline(map, routePath, {
-          color: "#1b5e8b",
+          color: "#202a38",
           opacity: 0.92,
           weight: 5,
           zIndex: 4,
@@ -721,7 +721,7 @@ function drawRouteOption(
   index: number,
   isSelected: boolean,
 ) {
-  const color = isSelected ? "#1b5e8b" : routeOptionColors[index % routeOptionColors.length];
+  const color = isSelected ? "#202a38" : routeOptionColors[index % routeOptionColors.length];
   return buildPolyline(map, option.points, {
     color,
     opacity: isSelected ? 0.94 : 0.38,

@@ -7,7 +7,7 @@ import 'package:socket_io_client/socket_io_client.dart' as IO;
 
 final apiBaseUrl = const String.fromEnvironment(
   'API_URL',
-  defaultValue: 'http://localhost:3000',
+  defaultValue: 'http://127.0.0.1:3000',
 );
 
 const _plateNumberKey = 'driver_plate_number';

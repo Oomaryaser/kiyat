@@ -50,7 +50,7 @@ const googleMapsApiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? "";
 const localRoutesStorageKey = "kiyat-admin-local-routes";
 const localRoutesChangedEvent = "kiyat-admin-local-routes-changed";
 const baghdadCenter = { lat: 33.3152, lng: 44.3661 };
-const routeColors = ["#1b5e8b", "#24605c", "#7c3aed", "#b45309", "#be123c"];
+const routeColors = ["#202a38", "#2ecc71", "#7c3aed", "#b45309", "#be123c"];
 const cleanMapStyle: google.maps.MapTypeStyle[] = [
   {
     featureType: "poi",
@@ -229,7 +229,7 @@ export function LiveMapPanel({ token, isDemo }: LiveMapPanelProps) {
           radius: isNearest ? 85 : 58,
           fillColor: "#ff9800",
           fillOpacity: isNearest ? 0.18 : 0.1,
-          strokeColor: isNearest ? "#e65100" : "#1b5e8b",
+          strokeColor: isNearest ? "#e65100" : "#202a38",
           strokeOpacity: isNearest ? 0.92 : 0.5,
           strokeWeight: isNearest ? 3 : 2,
           zIndex: isNearest ? 8 : 4,
@@ -260,9 +260,9 @@ export function LiveMapPanel({ token, isDemo }: LiveMapPanelProps) {
           map,
           center: position,
           radius: 70,
-          fillColor: "#1b5e8b",
+          fillColor: "#202a38",
           fillOpacity: 0.12,
-          strokeColor: "#1b5e8b",
+          strokeColor: "#202a38",
           strokeOpacity: 0.34,
           strokeWeight: 2,
           zIndex: 6,
@@ -711,7 +711,7 @@ function buildRouteDotIcon(color: string) {
 }
 
 function buildPassengerIcon(count: number, isNearest: boolean) {
-  const mainColor = isNearest ? "#ff5722" : "#1b5e8b";
+  const mainColor = isNearest ? "#ff5722" : "#202a38";
   const glowColor = isNearest ? "rgba(255,87,34,0.38)" : "rgba(0,0,0,0.18)";
   return svgDataUrl(`
     <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
@@ -732,14 +732,14 @@ function buildVehicleIcon(index: number) {
       <filter id="shadow" x="-40%" y="-40%" width="180%" height="180%">
         <feDropShadow dx="0" dy="5" stdDeviation="5" flood-color="rgba(0,0,0,0.22)"/>
       </filter>
-      <rect x="16" y="18" width="80" height="44" rx="14" fill="#1b5e8b" stroke="#fff" stroke-width="4" filter="url(#shadow)"/>
-      <path d="M32 18 L48 6 H72 L88 18 Z" fill="#24605c"/>
+      <rect x="16" y="18" width="80" height="44" rx="14" fill="#202a38" stroke="#fff" stroke-width="4" filter="url(#shadow)"/>
+      <path d="M32 18 L48 6 H72 L88 18 Z" fill="#2ecc71"/>
       <rect x="34" y="24" width="18" height="14" rx="4" fill="rgba(255,255,255,0.92)"/>
       <rect x="60" y="24" width="18" height="14" rx="4" fill="rgba(255,255,255,0.92)"/>
       <circle cx="34" cy="62" r="8" fill="#fff"/>
       <circle cx="78" cy="62" r="8" fill="#fff"/>
-      <circle cx="34" cy="62" r="4" fill="#24605c"/>
-      <circle cx="78" cy="62" r="4" fill="#24605c"/>
+      <circle cx="34" cy="62" r="4" fill="#2ecc71"/>
+      <circle cx="78" cy="62" r="4" fill="#2ecc71"/>
       <text x="56" y="55" text-anchor="middle" font-size="17" font-family="Arial, sans-serif" font-weight="900" fill="#fff">كية ${index}</text>
     </svg>
   `);

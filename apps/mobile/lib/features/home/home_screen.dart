@@ -9,10 +9,13 @@ import 'package:go_router/go_router.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:http/http.dart' as http;
 
+import '../../core/theme/app_theme.dart';
 import '../../core/utils/location_helper.dart';
 
 import '../../shared/data/transit_repository.dart';
 import '../../shared/models/transit_models.dart';
+import '../../shared/map_marker.dart';
+import '../../shared/ui/kiyat_logo.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -29,6 +32,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   StreamSubscription<Position>? _positionSubscription;
   Timer? _waitHeartbeatTimer;
+  Timer? _refreshTimer;
   String? _waitSessionId;
   String? _waitStatus;
   double? _pickupLat;
@@ -49,6 +53,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   void dispose() {
     _positionSubscription?.cancel();
     _waitHeartbeatTimer?.cancel();
+    _refreshTimer?.cancel();
     super.dispose();
   }
 
@@ -188,6 +193,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
       _startLocationStream(stops, routeId);
       _startWaitHeartbeat();
+      _startRefreshTimer(routeId);
     } catch (_) {}
   }
 
@@ -293,6 +299,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     _positionSubscription = null;
     _waitHeartbeatTimer?.cancel();
     _waitHeartbeatTimer = null;
+    _refreshTimer?.cancel();
+    _refreshTimer = null;
     setState(() {
       _waitSessionId = null;
       _waitStatus = null;
@@ -302,6 +310,29 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       _pickupLng = null;
       _userLat = null;
       _userLng = null;
+    });
+  }
+
+  void _startRefreshTimer(String routeId) {
+    _refreshTimer?.cancel();
+    _refreshTimer = Timer.periodic(const Duration(seconds: 4), (_) {
+      final waitId = _waitSessionId;
+      if (waitId == null || waitId.isEmpty) return;
+      final details = ref.read(routeDetailsProvider).value ?? const [];
+      final activeDetail = details
+          .where((detail) => detail.route.id == routeId)
+          .firstOrNull;
+      if (activeDetail != null) {
+        final pickup = activeDetail.stops.isEmpty
+            ? const LatLng(33.3152, 44.4161)
+            : LatLng(activeDetail.stops.first.lat, activeDetail.stops.first.lng);
+        final request = RouteArrivalRequest(
+          routeId: activeDetail.route.id,
+          lat: _pickupLat ?? pickup.latitude,
+          lng: _pickupLng ?? pickup.longitude,
+        );
+        ref.invalidate(routeArrivalProvider(request));
+      }
     });
   }
 
@@ -597,7 +628,7 @@ class _PassengerHomeDashboard extends ConsumerWidget {
               children: [
                 Row(
                   children: [
-                    _NotificationButton(onTap: () => context.push('/settings')),
+                    const KiyatLogo(size: 42, showWordmark: false),
                     const SizedBox(width: 10),
                     Expanded(
                       child: _HomeSearchPill(
@@ -605,6 +636,8 @@ class _PassengerHomeDashboard extends ConsumerWidget {
                         onChanged: onSearchChanged,
                       ),
                     ),
+                    const SizedBox(width: 10),
+                    _NotificationButton(onTap: () => context.push('/settings')),
                   ],
                 ),
                 const SizedBox(height: 10),
@@ -712,7 +745,7 @@ class _ActiveWaitingHome extends StatelessWidget {
       position.longitude,
       lat,
       lng,
-    ).round().clamp(35, 850);
+    ).round().clamp(0, 850);
   }
 
   @override
@@ -733,7 +766,7 @@ class _ActiveWaitingHome extends StatelessWidget {
     final pickupDistance = _pickupDistanceMeters();
     final walkingMinutes = (pickupDistance / 70).clamp(1, 8).ceil();
     final showWalkingNavigation =
-        pickupDistance > 30 && currentPosition != null;
+        pickupDistance > 40 && currentPosition != null;
 
     return Stack(
       children: [
@@ -815,8 +848,8 @@ class _WalkingNavigationBanner extends StatelessWidget {
       decoration: BoxDecoration(
         gradient: const LinearGradient(
           colors: [
-            Color(0xFF0F5132), // Google Maps dark green
-            Color(0xFF14532D), // slightly darker forest green
+            AppColors.primaryDark,
+            AppColors.navy,
           ],
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
@@ -824,7 +857,7 @@ class _WalkingNavigationBanner extends StatelessWidget {
         borderRadius: BorderRadius.circular(24),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF0F5132).withValues(alpha: 0.25),
+            color: AppColors.primaryDark.withValues(alpha: 0.25),
             blurRadius: 18,
             offset: const Offset(0, 8),
           ),
@@ -938,12 +971,12 @@ class _WaitingHeroCard extends StatelessWidget {
                     width: 38,
                     height: 38,
                     decoration: BoxDecoration(
-                      color: const Color(0xFF1B5E8B).withValues(alpha: 0.12),
+                      color: AppColors.primary.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(14),
                     ),
                     child: const Icon(
                       Icons.radar_rounded,
-                      color: Color(0xFF1B5E8B),
+                      color: AppColors.navy,
                       size: 20,
                     ),
                   ),
@@ -1077,7 +1110,7 @@ class _WaitingOperationsSheet extends StatelessWidget {
                       width: 10,
                       height: 10,
                       decoration: const BoxDecoration(
-                        color: Color(0xFF16A34A),
+                        color: AppColors.primary,
                         shape: BoxShape.circle,
                       ),
                     ),
@@ -1154,6 +1187,10 @@ class _PassengerHomeMapState extends State<_PassengerHomeMap> {
   bool _navigationModeActive = true;
   bool _mapInitialized = false;
   BitmapDescriptor? _walkerArrowIcon;
+  BitmapDescriptor? _pickupIcon;
+  BitmapDescriptor? _availableDriverIcon;
+  BitmapDescriptor? _headingDriverIcon;
+  BitmapDescriptor? _dropOffIcon;
 
   static const _mapStyle = '''
 [
@@ -1174,6 +1211,7 @@ class _PassengerHomeMapState extends State<_PassengerHomeMap> {
   void initState() {
     super.initState();
     _loadWalkerArrowIcon();
+    _loadCustomIcons();
     _loadRoadPaths();
     _loadWalkingPath();
   }
@@ -1321,12 +1359,12 @@ class _PassengerHomeMapState extends State<_PassengerHomeMap> {
         : LatLng(widget.currentPosition!.latitude,
             widget.currentPosition!.longitude);
     final colors = widget.isWaitingMode
-        ? [const Color(0xFF1B5E8B)]
+        ? [AppColors.navy]
         : [
-            const Color(0xFF0B78E3),
-            const Color(0xFF7B2CBF),
-            const Color(0xFFFF8A00),
-            const Color(0xFF16A34A),
+            AppColors.navy,
+            AppColors.primary,
+            AppColors.primaryDark,
+            const Color(0xFF637381),
           ];
     final walkerArrowIcon = _walkerArrowIcon;
     final walkerBearing = _walkerBearing();
@@ -1375,7 +1413,7 @@ class _PassengerHomeMapState extends State<_PassengerHomeMap> {
                             .map((stop) => LatLng(stop.lat, stop.lng))
                             .toList(),
                     color: widget.isWaitingMode
-                        ? const Color(0xFF155E75).withValues(alpha: 0.32)
+                        ? AppColors.navy.withValues(alpha: 0.32)
                         : colors[index % colors.length],
                     width: widget.isWaitingMode ? 4 : 6,
                     zIndex: 2 + index,
@@ -1391,7 +1429,7 @@ class _PassengerHomeMapState extends State<_PassengerHomeMap> {
                 Polyline(
                   polylineId: const PolylineId('home_walking_route'),
                   points: _walkingPath,
-                  color: const Color(0xFF16A34A).withValues(alpha: 0.92),
+                  color: AppColors.primary.withValues(alpha: 0.92),
                   width: 6,
                   patterns: [
                     PatternItem.dash(22),
@@ -1435,7 +1473,7 @@ class _PassengerHomeMapState extends State<_PassengerHomeMap> {
                     widget.currentPosition!.longitude,
                   ),
                   icon: BitmapDescriptor.defaultMarkerWithHue(
-                      BitmapDescriptor.hueAzure),
+                      BitmapDescriptor.hueGreen),
                   infoWindow: const InfoWindow(title: 'أنت هنا - بداية المشي'),
                 ),
               if (widget.isWaitingMode &&
@@ -1447,7 +1485,7 @@ class _PassengerHomeMapState extends State<_PassengerHomeMap> {
                     widget.pickupLat ?? widget.details.first.stops.first.lat,
                     widget.pickupLng ?? widget.details.first.stops.first.lng,
                   ),
-                  icon: BitmapDescriptor.defaultMarkerWithHue(
+                  icon: _pickupIcon ?? BitmapDescriptor.defaultMarkerWithHue(
                       BitmapDescriptor.hueGreen),
                   infoWindow: InfoWindow(
                     title: 'نهاية المشي: نقطة الصعود',
@@ -1461,11 +1499,9 @@ class _PassengerHomeMapState extends State<_PassengerHomeMap> {
                     markerId: MarkerId('home_vehicle_$index'),
                     position: LatLng(
                         widget.vehicles[index].lat, widget.vehicles[index].lng),
-                    icon: BitmapDescriptor.defaultMarkerWithHue(
-                      index == 0
-                          ? BitmapDescriptor.hueOrange
-                          : BitmapDescriptor.hueAzure,
-                    ),
+                    icon: index == 0
+                        ? (_headingDriverIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen))
+                        : (_availableDriverIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueCyan)),
                     infoWindow: InfoWindow(
                       title: widget.vehicles[index].vehicleLabel,
                       snippet: '${widget.vehicles[index].etaMinutes} دقائق',
@@ -1574,7 +1610,7 @@ class _PassengerHomeMapState extends State<_PassengerHomeMap> {
       ..color = Colors.black.withValues(alpha: 0.18)
       ..maskFilter = const ui.MaskFilter.blur(ui.BlurStyle.normal, 7);
     final whitePaint = Paint()..color = Colors.white;
-    final greenPaint = Paint()..color = const Color(0xFF16A34A);
+    final greenPaint = Paint()..color = AppColors.primary;
 
     final shadowPath = Path()
       ..moveTo(center.dx, 6)
@@ -1614,6 +1650,37 @@ class _PassengerHomeMapState extends State<_PassengerHomeMap> {
     });
   }
 
+  Future<void> _loadCustomIcons() async {
+    try {
+      final pickup = await assetToBitmapDescriptor(
+        'assets/images/kiyat_pickup_point_pin.png',
+        width: 35, height: 43,
+      );
+      final available = await assetToBitmapDescriptor(
+        'assets/images/kiyat_available_driver_marker.png',
+        width: 33, height: 43,
+      );
+      final heading = await assetToBitmapDescriptor(
+        'assets/images/kiyat_heading_to_passenger_driver_marker.png',
+        width: 35, height: 43,
+      );
+      final dropOff = await assetToBitmapDescriptor(
+        'assets/images/kiyat_drop_off_point_pin.png',
+        width: 35, height: 43,
+      );
+      if (mounted) {
+        setState(() {
+          _pickupIcon = pickup;
+          _availableDriverIcon = available;
+          _headingDriverIcon = heading;
+          _dropOffIcon = dropOff;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading custom marker icons: $e');
+    }
+  }
+
   double _walkerBearing() {
     final position = widget.currentPosition;
     if (position == null) return 0;
@@ -1643,9 +1710,9 @@ class _PassengerHomeMapState extends State<_PassengerHomeMap> {
 
   double _markerHue(int index) {
     return switch (index % 4) {
-      0 => BitmapDescriptor.hueAzure,
-      1 => BitmapDescriptor.hueViolet,
-      2 => BitmapDescriptor.hueOrange,
+      0 => BitmapDescriptor.hueGreen,
+      1 => BitmapDescriptor.hueCyan,
+      2 => BitmapDescriptor.hueBlue,
       _ => BitmapDescriptor.hueGreen,
     };
   }
@@ -1659,7 +1726,7 @@ class _ReCenterButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: const Color(0xFF16A34A),
+      color: AppColors.primary,
       borderRadius: BorderRadius.circular(999),
       elevation: 8,
       shadowColor: Colors.black.withValues(alpha: 0.25),
@@ -1705,11 +1772,11 @@ class _WalkingModeBadge extends StatelessWidget {
 
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: const Color(0xFF16A34A),
+        color: AppColors.primary,
         borderRadius: BorderRadius.circular(999),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF14532D).withValues(alpha: 0.28),
+            color: AppColors.primaryDark.withValues(alpha: 0.28),
             blurRadius: 18,
             offset: const Offset(0, 8),
           ),
@@ -1888,7 +1955,7 @@ class _CurrentLocationChip extends StatelessWidget {
               Icon(
                 hasLocation ? Icons.my_location : Icons.location_searching,
                 size: 17,
-                color: const Color(0xFF1B5E8B),
+                color: AppColors.navy,
               ),
               const SizedBox(width: 7),
               Text(
@@ -2169,10 +2236,10 @@ class _NearbyRoutesSheet extends StatelessWidget {
 
   Color _tileColor(int index) {
     return switch (index % 4) {
-      0 => const Color(0xFF0B78E3),
-      1 => const Color(0xFF7B2CBF),
-      2 => const Color(0xFFFF8A00),
-      _ => const Color(0xFF2563EB),
+      0 => AppColors.navy,
+      1 => AppColors.primary,
+      2 => AppColors.primaryDark,
+      _ => const Color(0xFF637381),
     };
   }
 
@@ -2370,7 +2437,7 @@ class _MobilityRecommendationModule extends ConsumerWidget {
                             TextSpan(text: origin),
                             const TextSpan(
                               text: '  ←  ',
-                              style: TextStyle(color: Color(0xFF1B5E8B)),
+                              style: TextStyle(color: AppColors.primary),
                             ),
                             TextSpan(text: destination),
                           ],
@@ -2415,9 +2482,8 @@ class _MobilityRecommendationModule extends ConsumerWidget {
                         Text(
                           isLive ? '$displayEta' : '~$displayEta',
                           style: TextStyle(
-                            color: isLive
-                                ? const Color(0xFF17A34A)
-                                : const Color(0xFF071827),
+                            color:
+                                isLive ? AppColors.primaryDark : AppColors.navy,
                             fontSize: 27,
                             height: 0.9,
                             fontWeight: FontWeight.w900,
@@ -2481,9 +2547,8 @@ class _MobilityRecommendationModule extends ConsumerWidget {
                     return _SignalPill(
                       label: isLive ? 'تتبع حي نشط' : 'وقت تقديري',
                       icon: isLive ? Icons.sensors : Icons.access_time,
-                      color: isLive
-                          ? const Color(0xFF17A34A)
-                          : Colors.grey.shade600,
+                      color:
+                          isLive ? AppColors.primaryDark : Colors.grey.shade600,
                     );
                   },
                   orElse: () => _SignalPill(
@@ -2498,17 +2563,17 @@ class _MobilityRecommendationModule extends ConsumerWidget {
                   icon: approach?.isStop == true
                       ? Icons.location_on_rounded
                       : Icons.add_road_rounded,
-                  color: const Color(0xFF16A34A),
+                  color: AppColors.primary,
                 ),
                 _SignalPill(
                   label: confidence,
                   icon: Icons.verified_rounded,
-                  color: const Color(0xFF1B5E8B),
+                  color: AppColors.navy,
                 ),
                 _SignalPill(
                   label: fareText,
                   icon: Icons.payments_rounded,
-                  color: const Color(0xFFF5A623),
+                  color: AppColors.primaryDark,
                 ),
               ],
             ),

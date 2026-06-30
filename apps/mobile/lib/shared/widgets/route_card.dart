@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/theme/app_theme.dart';
 import '../models/transit_models.dart';
 
 class RouteCard extends StatelessWidget {
@@ -138,14 +139,14 @@ class _ConfidenceBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = score >= 75 ? Colors.green : Colors.orange;
+    final color = score >= 75 ? AppColors.primaryDark : AppColors.navy;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
           color: color.withValues(alpha: 0.12),
           borderRadius: BorderRadius.circular(6)),
       child: Text('$score%',
-          style: TextStyle(color: color.shade800, fontWeight: FontWeight.w700)),
+          style: TextStyle(color: color, fontWeight: FontWeight.w700)),
     );
   }
 }

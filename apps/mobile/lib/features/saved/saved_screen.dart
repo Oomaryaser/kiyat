@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../shared/data/transit_repository.dart';
+import '../../shared/ui/kiyat_logo.dart';
 import '../../shared/widgets/route_card.dart';
 
 class SavedScreen extends ConsumerWidget {
@@ -14,12 +15,19 @@ class SavedScreen extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text(
-          'الخطوط المحفوظة',
-          style: TextStyle(
-            fontFamily: 'Tajawal',
-            fontWeight: FontWeight.bold,
-          ),
+        title: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            KiyatLogo(size: 30, showWordmark: false),
+            SizedBox(width: 8),
+            Text(
+              'الخطوط المحفوظة',
+              style: TextStyle(
+                fontFamily: 'Tajawal',
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
         ),
       ),
       body: savedIdsAsync.when(
@@ -59,7 +67,8 @@ class SavedScreen extends ConsumerWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.bookmark_border_rounded, size: 64, color: Colors.grey[400]),
+            Icon(Icons.bookmark_border_rounded,
+                size: 64, color: Colors.grey[400]),
             const SizedBox(height: 16),
             const Text(
               'لا توجد خطوط محفوظة',
@@ -100,7 +109,8 @@ class SavedScreen extends ConsumerWidget {
               ref.invalidate(routesProvider);
             },
             icon: const Icon(Icons.refresh),
-            label: const Text('إعادة المحاولة', style: TextStyle(fontFamily: 'Tajawal')),
+            label: const Text('إعادة المحاولة',
+                style: TextStyle(fontFamily: 'Tajawal')),
           ),
         ],
       ),

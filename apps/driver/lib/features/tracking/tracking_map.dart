@@ -11,6 +11,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_utils/shared_utils.dart';
 
 import '../../driver_repository.dart';
+import '../../shared/map_marker.dart';
 import '../../shared/widgets/state_panel.dart';
 import 'driver_route_guidance.dart';
 
@@ -106,6 +107,8 @@ class _DriverTrackingMapState extends State<DriverTrackingMap> {
   String? focusedWaitId;
   String? routeRequestKey;
   List<LatLng> roadToWait = const [];
+  List<LatLng> roadToRouteStart = const [];
+  LatLng? lockedRouteStartPoint;
   bool roadRouteLoaded = false;
   List<LatLng> roadRoute = const [];
   final Map<String, BitmapDescriptor> _passengerIcons = {};
@@ -151,12 +154,22 @@ class _DriverTrackingMapState extends State<DriverTrackingMap> {
   Future<void> _updatePassengerIcons() async {
     bool changed = false;
     if (_majorStopIcon == null) {
-      _majorStopIcon = await _buildStopDotIcon(const Color(0xFF1B5E8B), 28);
-      changed = true;
+      try {
+        _majorStopIcon = await assetToBitmapDescriptor(
+          'assets/images/kiyat_pickup_point_pin.png',
+          width: 35, height: 43,
+        );
+        changed = true;
+      } catch (_) {}
     }
     if (_minorStopIcon == null) {
-      _minorStopIcon = await _buildStopDotIcon(const Color(0xFF7BA9C6), 22);
-      changed = true;
+      try {
+        _minorStopIcon = await assetToBitmapDescriptor(
+          'assets/images/kiyat_drop_off_point_pin.png',
+          width: 35, height: 43,
+        );
+        changed = true;
+      } catch (_) {}
     }
 
     final nearestWait = _nearestWait;
@@ -167,7 +180,12 @@ class _DriverTrackingMapState extends State<DriverTrackingMap> {
       final cacheKey = '${wait.id}_${number}_$isNearest';
       if (!_passengerIcons.containsKey(cacheKey)) {
         try {
-          final icon = await _buildPassengerDotIcon(number, isNearest);
+          final icon = await assetToBitmapDescriptor(
+            isNearest
+                ? 'assets/images/kiyat_picked_up_on_trip_rider.png'
+                : 'assets/images/kiyat_waiting_nearby_rider_pin.png',
+            width: 35, height: 43,
+          );
           _passengerIcons[cacheKey] = icon;
           changed = true;
         } catch (_) {}
@@ -244,13 +262,27 @@ class _DriverTrackingMapState extends State<DriverTrackingMap> {
   @override
   void didUpdateWidget(covariant DriverTrackingMap oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.routeName != widget.routeName) {
+      lockedRouteStartPoint = null;
+      roadToRouteStart = const [];
+    }
     _updatePassengerIcons();
     final routeGuidance = _routeGuidance;
     final isOffRoute = routeGuidance?.isOffRoute == true;
     final nearestWait = isOffRoute ? null : _nearestWait;
+
+    final oldPosition = oldWidget.lastPosition;
+    final wasOffRoute = oldPosition != null &&
+        oldWidget.stops.length >= 2 &&
+        DriverRouteGuidance.fromStops(
+          stops: oldWidget.stops,
+          position: LatLng(oldPosition.latitude, oldPosition.longitude),
+          thresholdMeters: oldWidget.routeSnapThresholdMeters,
+        ).isOffRoute;
+
     final positionChanged =
-        oldWidget.lastPosition?.latitude != widget.lastPosition?.latitude ||
-        oldWidget.lastPosition?.longitude != widget.lastPosition?.longitude;
+        oldPosition?.latitude != widget.lastPosition?.latitude ||
+        oldPosition?.longitude != widget.lastPosition?.longitude;
     final waitsChanged =
         oldWidget.waits.map((wait) => wait.id).join(',') !=
         widget.waits.map((wait) => wait.id).join(',');
@@ -260,24 +292,35 @@ class _DriverTrackingMapState extends State<DriverTrackingMap> {
       _loadTransitRoadRoute();
     }
 
-    if (isOffRoute && routeGuidance != null && positionChanged) {
-      routeRequestKey = null;
-      roadToWait = const [];
-      roadRouteLoaded = false;
-      _focusOnRoutePoint(routeGuidance);
-      return;
+    if (isOffRoute && routeGuidance != null) {
+      if (positionChanged || roadToRouteStart.isEmpty) {
+        _loadRoadToRouteStart(routeGuidance.nearestPoint);
+      }
+    } else if (nearestWait != null) {
+      if (positionChanged || roadToWait.isEmpty) {
+        _loadRoadToWait(nearestWait);
+      }
     }
 
-    if (nearestWait != null &&
-        (focusedWaitId != nearestWait.id || positionChanged)) {
-      _focusOnWait(nearestWait);
-      _loadRoadToWait(nearestWait);
-      return;
-    }
-    if (waitsChanged || positionChanged) {
+    final stateChanged = (wasOffRoute != isOffRoute) ||
+        (focusedWaitId != nearestWait?.id) ||
+        waitsChanged;
+
+    if (stateChanged) {
       _focusBestTarget();
-      if (nearestWait != null) _loadRoadToWait(nearestWait);
+    } else if (positionChanged) {
+      _followDriver();
     }
+  }
+
+  void _followDriver() {
+    final position = widget.lastPosition;
+    if (position == null || controller == null) return;
+    controller!.animateCamera(
+      CameraUpdate.newLatLng(
+        LatLng(position.latitude, position.longitude),
+      ),
+    );
   }
 
   @override
@@ -581,10 +624,46 @@ class _DriverTrackingMapState extends State<DriverTrackingMap> {
   DriverRouteGuidance? get _routeGuidance {
     final position = widget.lastPosition;
     if (position == null || widget.stops.length < 2) return null;
-    return DriverRouteGuidance.fromStops(
-      stops: widget.stops,
-      position: LatLng(position.latitude, position.longitude),
-      thresholdMeters: widget.routeSnapThresholdMeters,
+    final currentPos = LatLng(position.latitude, position.longitude);
+
+    // 1. Calculate normal guidance (snapping to the entire route)
+    DriverRouteGuidance normalGuidance;
+    if (roadRoute.isNotEmpty) {
+      normalGuidance = DriverRouteGuidance.fromPoints(
+        points: roadRoute,
+        position: currentPos,
+        thresholdMeters: widget.routeSnapThresholdMeters,
+      );
+    } else {
+      normalGuidance = DriverRouteGuidance.fromStops(
+        stops: widget.stops,
+        position: currentPos,
+        thresholdMeters: widget.routeSnapThresholdMeters,
+      );
+    }
+
+    // 2. If we are on-route, release the lock and return normal guidance
+    if (!normalGuidance.isOffRoute) {
+      lockedRouteStartPoint = null;
+      return normalGuidance;
+    }
+
+    // 3. If we are off-route, lock the target point and guide the driver to it
+    if (lockedRouteStartPoint == null) {
+      lockedRouteStartPoint = normalGuidance.nearestPoint;
+    }
+
+    final distanceToLock = Geolocator.distanceBetween(
+      currentPos.latitude,
+      currentPos.longitude,
+      lockedRouteStartPoint!.latitude,
+      lockedRouteStartPoint!.longitude,
+    );
+
+    return DriverRouteGuidance(
+      nearestPoint: lockedRouteStartPoint!,
+      distanceMeters: distanceToLock,
+      isOffRoute: true,
     );
   }
 
@@ -660,10 +739,70 @@ class _DriverTrackingMapState extends State<DriverTrackingMap> {
   List<LatLng> _routeGuidancePoints(DriverRouteGuidance? guidance) {
     final position = widget.lastPosition;
     if (position == null || guidance == null) return const [];
+    if (roadToRouteStart.length > 1) return roadToRouteStart;
     return [
       LatLng(position.latitude, position.longitude),
       guidance.nearestPoint,
     ];
+  }
+
+  Future<void> _loadRoadToRouteStart(LatLng target) async {
+    final position = widget.lastPosition;
+    if (position == null) return;
+    final requestKey = [
+      position.latitude.toStringAsFixed(5),
+      position.longitude.toStringAsFixed(5),
+      target.latitude.toStringAsFixed(5),
+      target.longitude.toStringAsFixed(5),
+    ].join(',');
+    if (routeRequestKey == requestKey) return;
+    routeRequestKey = requestKey;
+
+    final fallback = [
+      LatLng(position.latitude, position.longitude),
+      target,
+    ];
+    try {
+      final uri = Uri.https(
+        'router.project-osrm.org',
+        '/route/v1/driving/${position.longitude},${position.latitude};${target.longitude},${target.latitude}',
+        {'overview': 'full', 'geometries': 'geojson'},
+      );
+      final response = await http.get(uri).timeout(const Duration(seconds: 6));
+      if (response.statusCode != 200) {
+        _setRoadRouteToStart(fallback, loaded: false);
+        return;
+      }
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final routes = data['routes'] as List<dynamic>? ?? const [];
+      final geometry = routes.firstOrNull?['geometry'] as Map<String, dynamic>?;
+      final coordinates =
+          geometry?['coordinates'] as List<dynamic>? ?? const [];
+      final points = coordinates
+          .whereType<List<dynamic>>()
+          .where((point) => point.length >= 2)
+          .map(
+            (point) => LatLng(
+              (point[1] as num).toDouble(),
+              (point[0] as num).toDouble(),
+            ),
+          )
+          .toList();
+      _setRoadRouteToStart(
+        points.length > 1 ? points : fallback,
+        loaded: points.length > 1,
+      );
+    } catch (_) {
+      _setRoadRouteToStart(fallback, loaded: false);
+    }
+  }
+
+  void _setRoadRouteToStart(List<LatLng> points, {required bool loaded}) {
+    if (!mounted) return;
+    setState(() {
+      roadToRouteStart = points;
+      roadRouteLoaded = loaded;
+    });
   }
 
   Future<void> _loadRoadToWait(PassengerWaitPoint wait) async {
@@ -723,12 +862,6 @@ class _DriverTrackingMapState extends State<DriverTrackingMap> {
       roadToWait = points;
       roadRouteLoaded = loaded;
     });
-    final controller = this.controller;
-    if (controller != null && points.length > 1) {
-      controller.animateCamera(
-        CameraUpdate.newLatLngBounds(_boundsFor(points), 72),
-      );
-    }
   }
 
   LatLngBounds _boundsFor(List<LatLng> points) {

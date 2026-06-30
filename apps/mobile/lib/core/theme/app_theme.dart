@@ -5,9 +5,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 /// Brand colors used throughout the app.
 class AppColors {
-  static const primary = Color(0xFF1B5E8B);
-  static const accent = Color(0xFFF5A623);
-  static const backgroundLight = Color(0xFFF8F9FA);
+  static const navy = Color(0xFF202A38);
+  static const primary = Color(0xFF2ECC71);
+  static const primaryDark = Color(0xFF1FA95A);
+  static const accent = navy;
+  static const backgroundLight = Color(0xFFF3F6F8);
   static const backgroundDark = Color(0xFF121212);
   static const surfaceDark = Color(0xFF1E1E1E);
   static const cardDark = Color(0xFF252525);
@@ -55,6 +57,7 @@ class AppTheme {
       seedColor: primary,
       primary: primary,
       secondary: accent,
+      tertiary: AppColors.navy,
       surface: Colors.white,
       brightness: Brightness.light,
     );
@@ -66,6 +69,7 @@ class AppTheme {
       appBarTheme: const AppBarTheme(
         centerTitle: false,
         backgroundColor: background,
+        foregroundColor: AppColors.navy,
         elevation: 0,
         scrolledUnderElevation: 1,
       ),
@@ -97,20 +101,24 @@ class AppTheme {
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
+          backgroundColor: primary,
+          foregroundColor: AppColors.navy,
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-          textStyle:
-              const TextStyle(fontFamily: 'Tajawal', fontWeight: FontWeight.w600),
+          textStyle: const TextStyle(
+              fontFamily: 'Tajawal', fontWeight: FontWeight.w600),
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
+          foregroundColor: AppColors.navy,
+          side: const BorderSide(color: AppColors.primary),
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-          textStyle:
-              const TextStyle(fontFamily: 'Tajawal', fontWeight: FontWeight.w600),
+          textStyle: const TextStyle(
+              fontFamily: 'Tajawal', fontWeight: FontWeight.w600),
         ),
       ),
       bottomSheetTheme: const BottomSheetThemeData(
@@ -121,6 +129,12 @@ class AppTheme {
       ),
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
+        backgroundColor: AppColors.navy,
+        contentTextStyle: const TextStyle(
+          color: Colors.white,
+          fontFamily: 'Tajawal',
+          fontWeight: FontWeight.w700,
+        ),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
       dialogTheme: DialogThemeData(
@@ -139,8 +153,9 @@ class AppTheme {
   static ThemeData get dark {
     final colorScheme = ColorScheme.fromSeed(
       seedColor: primary,
-      primary: const Color(0xFF5BA4D9),
+      primary: const Color(0xFF59E894),
       secondary: accent,
+      tertiary: const Color(0xFFDFE7EF),
       surface: AppColors.surfaceDark,
       brightness: Brightness.dark,
     );
@@ -188,8 +203,8 @@ class AppTheme {
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-          textStyle:
-              const TextStyle(fontFamily: 'Tajawal', fontWeight: FontWeight.w600),
+          textStyle: const TextStyle(
+              fontFamily: 'Tajawal', fontWeight: FontWeight.w600),
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
@@ -197,8 +212,8 @@ class AppTheme {
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-          textStyle:
-              const TextStyle(fontFamily: 'Tajawal', fontWeight: FontWeight.w600),
+          textStyle: const TextStyle(
+              fontFamily: 'Tajawal', fontWeight: FontWeight.w600),
         ),
       ),
       bottomSheetTheme: BottomSheetThemeData(
